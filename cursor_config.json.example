@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "powerpoint": {
+      "command": "python",
+      "args": ["./powerpoint_mcp_server.py"],
+      "env": {},
+      "description": "PowerPoint MCP Server for presentation manipulation",
+      "capabilities": {
+        "resources": true,
+        "tools": true,
+        "logging": true
+      }
+    }
+  }
+} 

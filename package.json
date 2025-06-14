@@ -1,0 +1,15 @@
+{
+  "name": "powerpoint-mcp-server",
+  "version": "1.0.0",
+  "description": "PowerPoint MCP Server for presentation manipulation",
+  "main": "powerpoint_mcp_server.py",
+  "bin": {
+    "powerpoint-mcp-server": "./powerpoint_mcp_server.py"
+  },
+  "scripts": {
+    "start": "python powerpoint_mcp_server.py"
+  },
+  "keywords": ["mcp", "powerpoint", "presentations"],
+  "author": "",
+  "license": "MIT"
+} 
