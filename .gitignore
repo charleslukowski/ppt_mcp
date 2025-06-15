@@ -201,6 +201,7 @@ PROJECT_SUMMARY.md
 style_analysis_report.txt
 learned_style_profile*.json
 cursor_config.json
+*NEXT_STEPS*.md
 
 # Test outputs and temporary presentations
 *test*.pptx

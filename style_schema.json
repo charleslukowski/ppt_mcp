@@ -1,0 +1,308 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PowerPoint Style Profile Schema",
+  "description": "JSON schema for PowerPoint presentation style profiles used in the MCP server",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Unique name for the style profile"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of the style profile"
+    },
+    "version": {
+      "type": "string",
+      "default": "1.0.0",
+      "description": "Schema version for compatibility"
+    },
+    "created_from": {
+      "type": "string",
+      "description": "Source file path or template this profile was created from"
+    },
+    "confidence_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Confidence score (0-1) indicating how consistent the source style was"
+    },
+    "font_hierarchy": {
+      "type": "object",
+      "description": "Text hierarchy definitions",
+      "properties": {
+        "title_style": {
+          "$ref": "#/definitions/font_profile"
+        },
+        "subtitle_style": {
+          "oneOf": [
+            {"$ref": "#/definitions/font_profile"},
+            {"type": "null"}
+          ]
+        },
+        "body_style": {
+          "$ref": "#/definitions/font_profile"
+        },
+        "bullet_style": {
+          "oneOf": [
+            {"$ref": "#/definitions/font_profile"},
+            {"type": "null"}
+          ]
+        },
+        "caption_style": {
+          "oneOf": [
+            {"$ref": "#/definitions/font_profile"},
+            {"type": "null"}
+          ]
+        }
+      },
+      "required": ["title_style", "body_style"]
+    },
+    "color_palette": {
+      "type": "array",
+      "description": "Primary color palette for the presentation",
+      "items": {
+        "$ref": "#/definitions/color_profile"
+      },
+      "minItems": 1,
+      "maxItems": 20
+    },
+    "layout_patterns": {
+      "type": "object",
+      "description": "Layout and positioning patterns",
+      "properties": {
+        "average_left_margin": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Average left margin in inches"
+        },
+        "average_top_margin": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Average top margin in inches"
+        },
+        "common_widths": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          },
+          "description": "Common element widths in inches"
+        },
+        "common_heights": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          },
+          "description": "Common element heights in inches"
+        },
+        "grid_alignment": {
+          "type": "object",
+          "description": "Grid alignment patterns",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "shape_distribution": {
+          "type": "object",
+          "description": "Distribution of shape types",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "required": ["average_left_margin", "average_top_margin"]
+    },
+    "slide_layouts": {
+      "type": "object",
+      "description": "Predefined slide layout templates",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "layout_type": {
+            "type": "string",
+            "enum": ["title", "title_content", "content", "two_content", "comparison", "blank", "custom"]
+          },
+          "elements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/layout_element"
+            }
+          }
+        }
+      }
+    },
+    "theme_colors": {
+      "type": "object",
+      "description": "PowerPoint theme color mappings",
+      "properties": {
+        "background1": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "text1": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "background2": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "text2": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "accent1": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "accent2": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "accent3": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "accent4": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "accent5": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "accent6": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "hyperlink": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "followed_hyperlink": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"}
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional metadata",
+      "properties": {
+        "created_date": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "last_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "usage_count": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        }
+      }
+    }
+  },
+  "required": ["name", "font_hierarchy", "color_palette", "layout_patterns"],
+  "definitions": {
+    "font_profile": {
+      "type": "object",
+      "description": "Font styling information",
+      "properties": {
+        "family": {
+          "type": "string",
+          "description": "Font family name (e.g., 'Calibri', 'Arial')"
+        },
+        "size_pt": {
+          "type": "number",
+          "minimum": 6,
+          "maximum": 144,
+          "description": "Font size in points"
+        },
+        "bold": {
+          "type": "boolean",
+          "description": "Whether the font is bold"
+        },
+        "italic": {
+          "type": "boolean",
+          "description": "Whether the font is italic"
+        },
+        "underline": {
+          "type": "boolean",
+          "description": "Whether the font is underlined"
+        },
+        "color_rgb": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "description": "RGB color values [r, g, b]"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "usage_frequency": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 1,
+          "description": "How frequently this font style was used in the source"
+        }
+      },
+      "required": ["family", "size_pt", "bold", "italic", "underline"]
+    },
+    "color_profile": {
+      "type": "object",
+      "description": "Color usage information",
+      "properties": {
+        "rgb": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "description": "RGB color values [r, g, b]"
+        },
+        "hex_code": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "description": "Hexadecimal color code"
+        },
+        "usage_context": {
+          "type": "string",
+          "enum": ["text", "background", "accent", "shape", "fill", "border", "unknown"],
+          "description": "Context where this color is typically used"
+        },
+        "frequency": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How often this color appears in the source"
+        },
+        "name": {
+          "type": "string",
+          "description": "Optional human-readable name for the color"
+        }
+      },
+      "required": ["rgb", "hex_code", "usage_context", "frequency"]
+    },
+    "layout_element": {
+      "type": "object",
+      "description": "Layout element definition",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["text_box", "image", "chart", "table", "shape", "placeholder"]
+        },
+        "position": {
+          "type": "object",
+          "properties": {
+            "left": {"type": "number", "minimum": 0},
+            "top": {"type": "number", "minimum": 0},
+            "width": {"type": "number", "minimum": 0},
+            "height": {"type": "number", "minimum": 0}
+          },
+          "required": ["left", "top", "width", "height"]
+        },
+        "style": {
+          "type": "object",
+          "description": "Element-specific styling",
+          "additionalProperties": true
+        },
+        "content_type": {
+          "type": "string",
+          "enum": ["title", "subtitle", "body", "bullet", "caption", "data", "image", "chart"],
+          "description": "Type of content this element typically contains"
+        }
+      },
+      "required": ["type", "position"]
+    }
+  }
+} 
