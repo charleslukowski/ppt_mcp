@@ -78,6 +78,144 @@ except ImportError as e:
     StyleAnalyzer = None
     STYLE_ANALYSIS_AVAILABLE = False
 
+# =============================================================================
+# SYSTEM PROMPTS AND TOOL GUIDANCE
+# =============================================================================
+
+# Overall server system prompt
+POWERPOINT_SERVER_SYSTEM_PROMPT = """
+You are a professional PowerPoint presentation assistant with expertise in creating 
+visually appealing, well-structured, and content-rich presentations. Your role is to:
+
+1. PROFESSIONAL DESIGN: Always prioritize clean, professional layouts with consistent 
+   formatting, appropriate spacing, and visual hierarchy.
+
+2. CONTENT CLARITY: Focus on clear, concise messaging with effective use of bullet points, 
+   headings, and visual elements to enhance understanding.
+
+3. BRAND CONSISTENCY: Maintain consistent colors, fonts, and styling throughout presentations.
+   Use corporate color palettes and professional typography.
+
+4. ACCESSIBILITY: Ensure presentations are readable with appropriate contrast, font sizes,
+   and logical content flow.
+
+5. EFFICIENCY: Leverage templates, themes, and automation to create presentations quickly
+   while maintaining high quality standards.
+
+Key Principles:
+- Modify these whenever prompted to do so, these are the defaults, not the rules
+- Less is more: Avoid cluttered slides
+- Visual hierarchy: Use size, color, and positioning to guide attention
+- Consistency: Maintain uniform styling across all slides
+- Professional aesthetics: Choose appropriate colors, fonts, and layouts
+- Data visualization: Present complex information through charts and graphics
+"""
+
+# Category-specific prompts
+PRESENTATION_CREATION_PROMPT = """
+When creating presentations:
+- Start with a clear purpose and target audience in mind
+- Use appropriate slide layouts for different content types (start with blank slides for any new slides)
+- Establish consistent branding and visual themes early
+- Consider the presentation flow and logical progression
+- Ensure all slides serve the overall narrative
+- If no color scheme is provided, create a professional one
+"""
+
+CONTENT_FORMATTING_PROMPT = """
+When formatting content:
+- Use bullet points for lists and key points
+- Keep text concise and readable (max 6 bullet points per slide)
+- Use appropriate font sizes (title: 28-36pt, body: 18-24pt)
+- Maintain consistent spacing and alignment
+- Use bold/italic strategically for emphasis
+- Avoid full sentences in bullet points when possible
+"""
+
+VISUAL_DESIGN_PROMPT = """
+When designing visual elements:
+- Use high-contrast color combinations for readability
+- Align elements to invisible grids for professional appearance
+- Maintain consistent spacing between elements
+- Use white space effectively to avoid clutter
+- Choose colors that support the message and brand
+- Ensure images are high-quality and appropriately sized
+- OK to specify image placeholders with text box that says 'placeholder -- recommend image of X' 
+"""
+
+CHART_DATA_PROMPT = """
+When creating charts and data visualizations:
+- Choose chart types that best represent the data story
+- Use clear, descriptive titles and labels
+- Apply consistent color schemes across all charts
+- Avoid 3D effects that can distort data perception
+- Include data source attribution when appropriate
+- Keep axis labels readable and well-formatted
+"""
+
+TEMPLATE_AUTOMATION_PROMPT = """
+When working with templates and automation:
+- Design templates with flexibility and reusability in mind
+- Use clear placeholder naming conventions
+- Include conditional logic for dynamic content
+- Maintain consistent formatting across generated slides
+- Test templates with various data sets before deployment
+- Document template usage and data requirements
+"""
+
+# Tool-specific prompts
+TOOL_PROMPTS = {
+    "create_presentation": """
+Create a new presentation with professional defaults. Consider the intended use case and audience.
+If using a template, ensure it aligns with the presentation's purpose and brand requirements.
+""",
+    
+    "add_text_box": """
+Add text with appropriate formatting for its role (title, body, caption). Use professional typography
+with adequate font sizes, proper spacing, and consistent alignment. Consider the text hierarchy
+and its relationship to other slide elements.
+""",
+    
+    "add_image": """
+Add images that enhance the content and maintain professional quality. Ensure proper sizing,
+positioning, and aspect ratio. Consider how the image supports the slide's message and
+integrates with other elements.
+""",
+    
+    "add_chart": """
+Create data visualizations that clearly communicate insights. Choose appropriate chart types
+for the data, use professional color schemes, and ensure all labels are readable and meaningful.
+Focus on the story the data tells.
+""",
+    
+    "create_color_palette": """
+Establish brand-consistent color schemes that ensure readability and professional appearance.
+Consider color psychology, accessibility, and how colors work together across different contexts.
+""",
+    
+    "apply_typography_style": """
+Apply consistent typography that supports content hierarchy and readability. Use appropriate
+font sizes, weights, and spacing for different content types (titles, headings, body text, captions).
+""",
+    
+    "create_master_slide_theme": """
+Design comprehensive themes that ensure consistency across all slides. Include proper color schemes,
+typography, spacing guidelines, and layout principles that can be applied systematically.
+""",
+    
+    "create_template": """
+Build reusable templates that combine professional design with flexible content structures.
+Include clear placeholders, logical content flow, and consistent formatting that works
+across different use cases and data sets.
+""",
+    
+    "bulk_generate_presentations": """
+Generate multiple presentations efficiently while maintaining quality and consistency.
+Ensure each presentation serves its specific purpose while adhering to the overall
+design and branding standards.
+"""
+}
+
 # Logger already configured above
 
 # Server instance
@@ -153,9 +291,60 @@ class PowerPointManager:
             ]
         }
     
+    def get_system_prompt(self) -> str:
+        """Get the overall system prompt for the PowerPoint server"""
+        return POWERPOINT_SERVER_SYSTEM_PROMPT
+    
+    def get_category_prompt(self, category: str) -> str:
+        """Get category-specific prompt for different types of operations"""
+        prompts = {
+            "creation": PRESENTATION_CREATION_PROMPT,
+            "formatting": CONTENT_FORMATTING_PROMPT,
+            "visual": VISUAL_DESIGN_PROMPT,
+            "charts": CHART_DATA_PROMPT,
+            "templates": TEMPLATE_AUTOMATION_PROMPT
+        }
+        return prompts.get(category, "")
+    
+    def get_tool_prompt(self, tool_name: str) -> str:
+        """Get tool-specific prompt for a given operation"""
+        return TOOL_PROMPTS.get(tool_name, "")
+    
+    def get_contextual_guidance(self, tool_name: str, **kwargs) -> str:
+        """Get contextual guidance for a tool operation with specific parameters"""
+        base_prompt = self.get_tool_prompt(tool_name)
+        
+        # Add context-specific guidance based on parameters
+        if tool_name == "add_text_box":
+            font_size = kwargs.get("font_size", 18)
+            if font_size >= 28:
+                base_prompt += "\n\nThis appears to be title text - use strong, impactful language."
+            elif font_size <= 14:
+                base_prompt += "\n\nThis appears to be caption text - keep it concise and supportive."
+                
+        elif tool_name == "add_chart":
+            chart_type = kwargs.get("chart_type", "")
+            if chart_type == "pie":
+                base_prompt += "\n\nPie charts work best with 5 or fewer categories. Consider using a bar chart for more categories."
+            elif chart_type == "line":
+                base_prompt += "\n\nLine charts are excellent for showing trends over time. Ensure data points are clearly labeled."
+                
+        elif tool_name == "create_color_palette":
+            base_prompt += "\n\nConsider the presentation's purpose: corporate (blues/grays), creative (varied), financial (blues/greens)."
+            
+        return base_prompt
+    
+    def log_operation_guidance(self, tool_name: str, **kwargs):
+        """Log guidance for the current operation"""
+        guidance = self.get_contextual_guidance(tool_name, **kwargs)
+        logger.info(f"Operation guidance for {tool_name}: {guidance.strip()}")
+    
     def create_presentation(self, template_path: Optional[str] = None) -> str:
         """Create a new presentation, optionally from a template"""
         try:
+            # Log guidance for presentation creation
+            self.log_operation_guidance("create_presentation", template_path=template_path)
+            
             if template_path and os.path.exists(template_path):
                 prs = Presentation(template_path)
                 logger.info(f"Created presentation from template: {template_path}")
@@ -221,6 +410,9 @@ class PowerPointManager:
                      font_size: int = 18, bold: bool = False, italic: bool = False) -> bool:
         """Add a text box to a slide"""
         try:
+            # Log guidance for text formatting
+            self.log_operation_guidance("add_text_box", font_size=font_size, text_length=len(text))
+            
             if prs_id not in self.presentations:
                 raise ValueError(f"Presentation {prs_id} not found")
             
@@ -252,6 +444,9 @@ class PowerPointManager:
                   left: float = 1, top: float = 1, width: Optional[float] = None, height: Optional[float] = None) -> bool:
         """Add an image to a slide from file path or URL"""
         try:
+            # Log guidance for image addition
+            self.log_operation_guidance("add_image", is_url=image_source.startswith(('http://', 'https://')))
+            
             if prs_id not in self.presentations:
                 raise ValueError(f"Presentation {prs_id} not found")
             
@@ -681,6 +876,9 @@ class PowerPointManager:
                            colors: Dict[str, str] = None) -> bool:
         """Create a custom color palette for brand consistency"""
         try:
+            # Log guidance for color palette creation
+            self.log_operation_guidance("create_color_palette", palette_name=palette_name, has_custom_colors=colors is not None)
+            
             if prs_id not in self.presentations:
                 raise ValueError(f"Presentation {prs_id} not found")
             
