@@ -110,7 +110,9 @@ FOCUSED_TOOL_GUIDANCE = {
     "bulk_generate_presentations": "Maintain quality standards while optimizing efficiency.",
     "save_presentation": "Verify file path accessibility before saving.",
     "load_presentation": "Check file format compatibility and integrity.",
-    "add_slide": "Use layout index 6 (blank) for maximum flexibility."
+    "add_slide": "Use layout index 6 (blank) for maximum flexibility.",
+    "screenshot_slides": "Generate high-quality images for visual analysis. Windows only.",
+    "critique_presentation": "Comprehensive analysis covers design, content, accessibility, and technical aspects."
 }
 
 # Success criteria generator
@@ -123,7 +125,9 @@ def get_success_criteria(tool_name: str, **kwargs) -> str:
         "add_chart": f"{kwargs.get('chart_type', 'chart').title()} chart with {len(kwargs.get('categories', []))} categories created.",
         "save_presentation": f"Presentation saved to {kwargs.get('file_path', 'specified path')}.",
         "load_presentation": f"Presentation loaded from {kwargs.get('file_path', 'file')} successfully.",
-        "add_slide": f"New slide added using layout {kwargs.get('layout_index', 6)}."
+        "add_slide": f"New slide added using layout {kwargs.get('layout_index', 6)}.",
+        "screenshot_slides": f"Screenshots generated for all slides in {kwargs.get('image_format', 'PNG')} format.",
+        "critique_presentation": f"Complete {kwargs.get('critique_type', 'comprehensive')} analysis with score and recommendations."
     }
     return criteria.get(tool_name, f"{tool_name} operation completed successfully.")
 
@@ -2081,6 +2085,537 @@ class PowerPointManager:
         except Exception as e:
             logger.error(f"Error processing template element: {e}")
 
+    # Add critique functionality after the existing screenshot implementation
+
+    def critique_presentation(self, file_path: str, critique_type: str = "comprehensive", 
+                            include_screenshots: bool = True, output_dir: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Analyze a PowerPoint presentation and provide comprehensive critique.
+        
+        Args:
+            file_path: Path to the PowerPoint file
+            critique_type: Type of critique ("design", "content", "accessibility", "technical", "comprehensive")
+            include_screenshots: Whether to generate screenshots for visual analysis
+            output_dir: Directory to save screenshots (if generated)
+            
+        Returns:
+            Dictionary containing critique results
+        """
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Presentation file not found: {file_path}")
+        
+        # Load presentation for analysis
+        temp_prs_id = self.load_presentation(file_path)
+        prs = self.presentations[temp_prs_id]
+        
+        critique_results = {
+            "file_path": file_path,
+            "critique_type": critique_type,
+            "timestamp": datetime.now().isoformat(),
+            "summary": {
+                "total_slides": len(prs.slides),
+                "overall_score": 0,
+                "critical_issues": 0,
+                "warnings": 0,
+                "recommendations": 0
+            },
+            "issues": [],
+            "strengths": [],
+            "recommendations": [],
+            "detailed_analysis": {}
+        }
+        
+        try:
+            # Generate screenshots if requested
+            screenshot_paths = []
+            if include_screenshots:
+                try:
+                    screenshot_paths = self.screenshot_slides(
+                        file_path, output_dir, "PNG", 1920, 1080
+                    )
+                    critique_results["screenshots"] = screenshot_paths
+                except Exception as e:
+                    logger.warning(f"Could not generate screenshots: {e}")
+            
+            # Perform analysis based on critique type
+            if critique_type in ["design", "comprehensive"]:
+                design_analysis = self._analyze_design_quality(prs, screenshot_paths)
+                critique_results["detailed_analysis"]["design"] = design_analysis
+                critique_results["issues"].extend(design_analysis.get("issues", []))
+                critique_results["strengths"].extend(design_analysis.get("strengths", []))
+                critique_results["recommendations"].extend(design_analysis.get("recommendations", []))
+            
+            if critique_type in ["content", "comprehensive"]:
+                content_analysis = self._analyze_content_quality(prs)
+                critique_results["detailed_analysis"]["content"] = content_analysis
+                critique_results["issues"].extend(content_analysis.get("issues", []))
+                critique_results["strengths"].extend(content_analysis.get("strengths", []))
+                critique_results["recommendations"].extend(content_analysis.get("recommendations", []))
+            
+            if critique_type in ["accessibility", "comprehensive"]:
+                accessibility_analysis = self._analyze_accessibility(prs)
+                critique_results["detailed_analysis"]["accessibility"] = accessibility_analysis
+                critique_results["issues"].extend(accessibility_analysis.get("issues", []))
+                critique_results["strengths"].extend(accessibility_analysis.get("strengths", []))
+                critique_results["recommendations"].extend(accessibility_analysis.get("recommendations", []))
+            
+            if critique_type in ["technical", "comprehensive"]:
+                technical_analysis = self._analyze_technical_quality(file_path, prs)
+                critique_results["detailed_analysis"]["technical"] = technical_analysis
+                critique_results["issues"].extend(technical_analysis.get("issues", []))
+                critique_results["strengths"].extend(technical_analysis.get("strengths", []))
+                critique_results["recommendations"].extend(technical_analysis.get("recommendations", []))
+            
+            # Calculate summary metrics
+            critique_results = self._calculate_critique_summary(critique_results)
+            
+            return critique_results
+            
+        finally:
+            # Clean up temporary presentation
+            if temp_prs_id in self.presentations:
+                del self.presentations[temp_prs_id]
+    
+    def _analyze_design_quality(self, prs, screenshot_paths: List[str] = None) -> Dict[str, Any]:
+        """Analyze design quality aspects of the presentation"""
+        analysis = {
+            "score": 0,
+            "issues": [],
+            "strengths": [],
+            "recommendations": [],
+            "metrics": {}
+        }
+        
+        # Font consistency analysis
+        fonts_used = set()
+        font_sizes = []
+        slide_layouts = []
+        color_usage = {}
+        
+        for slide_idx, slide in enumerate(prs.slides):
+            slide_fonts = set()
+            slide_font_sizes = []
+            
+            # Analyze shapes and text
+            for shape in slide.shapes:
+                if hasattr(shape, 'text_frame') and shape.text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        for run in paragraph.runs:
+                            if run.font.name:
+                                fonts_used.add(run.font.name)
+                                slide_fonts.add(run.font.name)
+                            if run.font.size:
+                                font_size = run.font.size.pt
+                                font_sizes.append(font_size)
+                                slide_font_sizes.append(font_size)
+                
+                # Check for visual issues
+                if hasattr(shape, 'fill') and shape.fill.type is not None:
+                    # Check for problematic green rectangles
+                    try:
+                        if hasattr(shape.fill, 'fore_color'):
+                            # Only check fore_color if the fill type supports it
+                            if shape.fill.type == 1:  # MSO_FILL_TYPE.SOLID
+                                rgb = shape.fill.fore_color.rgb
+                                if rgb.red == 0 and rgb.green > 200 and rgb.blue == 0:
+                                    analysis["issues"].append({
+                                        "type": "critical",
+                                        "category": "design",
+                                        "slide": slide_idx + 1,
+                                        "issue": "Green rectangle covering content",
+                                        "description": "Detected green fill that may be obscuring slide content"
+                                    })
+                    except (TypeError, AttributeError):
+                        # Skip shapes with unsupported fill types
+                        pass
+            
+            # Check font consistency per slide
+            if len(slide_fonts) > 3:
+                analysis["issues"].append({
+                    "type": "warning",
+                    "category": "design",
+                    "slide": slide_idx + 1,
+                    "issue": "Too many fonts on single slide",
+                    "description": f"Slide uses {len(slide_fonts)} different fonts, consider limiting to 2-3"
+                })
+        
+        # Overall font analysis
+        analysis["metrics"]["total_fonts"] = len(fonts_used)
+        analysis["metrics"]["font_sizes_range"] = {
+            "min": min(font_sizes) if font_sizes else 0,
+            "max": max(font_sizes) if font_sizes else 0,
+            "avg": sum(font_sizes) / len(font_sizes) if font_sizes else 0
+        }
+        
+        if len(fonts_used) > 4:
+            analysis["issues"].append({
+                "type": "warning",
+                "category": "design",
+                "slide": "global",
+                "issue": "Too many fonts in presentation",
+                "description": f"Presentation uses {len(fonts_used)} fonts. Consider limiting to 2-3 for consistency."
+            })
+        elif len(fonts_used) <= 2:
+            analysis["strengths"].append("Consistent font usage throughout presentation")
+        
+        # Font size analysis
+        if font_sizes:
+            min_size = min(font_sizes)
+            if min_size < 18:
+                analysis["issues"].append({
+                    "type": "warning",
+                    "category": "design",
+                    "slide": "global",
+                    "issue": "Small font sizes detected",
+                    "description": f"Minimum font size is {min_size}pt. Consider 18pt+ for readability."
+                })
+            
+            if max(font_sizes) > 72:
+                analysis["issues"].append({
+                    "type": "warning",
+                    "category": "design",
+                    "slide": "global",
+                    "issue": "Very large font sizes",
+                    "description": "Some text may be unnecessarily large"
+                })
+        
+        # Add design recommendations
+        if len(analysis["issues"]) == 0:
+            analysis["strengths"].append("Good overall design consistency")
+            analysis["score"] = 85
+        else:
+            analysis["score"] = max(50, 85 - len(analysis["issues"]) * 10)
+            analysis["recommendations"].extend([
+                "Review font consistency across slides",
+                "Ensure minimum 18pt font size for readability",
+                "Check for overlapping or obscured elements"
+            ])
+        
+        return analysis
+    
+    def _analyze_content_quality(self, prs) -> Dict[str, Any]:
+        """Analyze content quality and structure"""
+        analysis = {
+            "score": 0,
+            "issues": [],
+            "strengths": [],
+            "recommendations": [],
+            "metrics": {}
+        }
+        
+        total_text_length = 0
+        slides_with_title = 0
+        slides_with_bullets = 0
+        bullet_counts = []
+        empty_slides = 0
+        
+        for slide_idx, slide in enumerate(prs.slides):
+            slide_text_length = 0
+            has_title = False
+            bullet_count = 0
+            has_content = False
+            
+            for shape in slide.shapes:
+                if hasattr(shape, 'text_frame') and shape.text_frame:
+                    shape_text = shape.text_frame.text.strip()
+                    if shape_text:
+                        has_content = True
+                        slide_text_length += len(shape_text)
+                        
+                        # Check if this is likely a title (large font, short text)
+                        if len(shape_text) < 100 and not has_title:
+                            for paragraph in shape.text_frame.paragraphs:
+                                for run in paragraph.runs:
+                                    if run.font.size and run.font.size.pt > 24:
+                                        has_title = True
+                                        break
+                        
+                        # Count bullet points
+                        bullet_count += len([p for p in shape.text_frame.paragraphs if p.text.strip()])
+            
+            total_text_length += slide_text_length
+            
+            if has_title:
+                slides_with_title += 1
+            
+            if bullet_count > 0:
+                slides_with_bullets += 1
+                bullet_counts.append(bullet_count)
+            
+            if not has_content:
+                empty_slides += 1
+                analysis["issues"].append({
+                    "type": "warning",
+                    "category": "content",
+                    "slide": slide_idx + 1,
+                    "issue": "Empty slide",
+                    "description": "Slide contains no text content"
+                })
+            
+            # Check for too much text
+            if slide_text_length > 300:
+                analysis["issues"].append({
+                    "type": "warning",
+                    "category": "content",
+                    "slide": slide_idx + 1,
+                    "issue": "Too much text",
+                    "description": f"Slide has {slide_text_length} characters. Consider breaking into multiple slides."
+                })
+            
+            # Check for too many bullets
+            if bullet_count > 7:
+                analysis["issues"].append({
+                    "type": "warning",
+                    "category": "content",
+                    "slide": slide_idx + 1,
+                    "issue": "Too many bullet points",
+                    "description": f"Slide has {bullet_count} bullet points. Consider limiting to 5-7."
+                })
+        
+        # Calculate metrics
+        analysis["metrics"] = {
+            "total_slides": len(prs.slides),
+            "slides_with_title": slides_with_title,
+            "slides_with_bullets": slides_with_bullets,
+            "empty_slides": empty_slides,
+            "avg_text_length": total_text_length / len(prs.slides) if prs.slides else 0,
+            "avg_bullets_per_slide": sum(bullet_counts) / len(bullet_counts) if bullet_counts else 0
+        }
+        
+        # Evaluate content quality
+        title_ratio = slides_with_title / len(prs.slides) if prs.slides else 0
+        
+        if title_ratio > 0.8:
+            analysis["strengths"].append("Most slides have clear titles")
+        elif title_ratio < 0.5:
+            analysis["issues"].append({
+                "type": "warning",
+                "category": "content",
+                "slide": "global",
+                "issue": "Missing slide titles",
+                "description": f"Only {slides_with_title} of {len(prs.slides)} slides have clear titles"
+            })
+        
+        if empty_slides > 0:
+            analysis["recommendations"].append(f"Remove or add content to {empty_slides} empty slides")
+        
+        # Calculate score
+        score = 80
+        score -= empty_slides * 10
+        score -= len([i for i in analysis["issues"] if i["type"] == "critical"]) * 15
+        score -= len([i for i in analysis["issues"] if i["type"] == "warning"]) * 5
+        score += len(analysis["strengths"]) * 5
+        
+        analysis["score"] = max(0, min(100, score))
+        
+        return analysis
+    
+    def _analyze_accessibility(self, prs) -> Dict[str, Any]:
+        """Analyze accessibility aspects"""
+        analysis = {
+            "score": 0,
+            "issues": [],
+            "strengths": [],
+            "recommendations": [],
+            "metrics": {}
+        }
+        
+        alt_text_missing = 0
+        total_images = 0
+        low_contrast_issues = 0
+        
+        for slide_idx, slide in enumerate(prs.slides):
+            for shape in slide.shapes:
+                # Check images for alt text
+                if hasattr(shape, 'image') or 'Picture' in str(type(shape)):
+                    total_images += 1
+                    # Note: python-pptx doesn't easily expose alt text, so this is a placeholder
+                    # In a real implementation, you'd check shape.element for alt text
+                    if not hasattr(shape, 'alt_text') or not shape.alt_text:
+                        alt_text_missing += 1
+                
+                # Check for potential contrast issues (simplified)
+                if hasattr(shape, 'text_frame') and shape.text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        for run in paragraph.runs:
+                            try:
+                                if run.font.color and hasattr(run.font.color, 'rgb'):
+                                    # Simplified contrast check
+                                    if run.font.color.rgb and run.font.color.rgb.red == run.font.color.rgb.blue == run.font.color.rgb.green:
+                                        # Gray text might have contrast issues
+                                        low_contrast_issues += 1
+                            except (TypeError, AttributeError):
+                                # Skip text with unsupported color types
+                                pass
+        
+        # Record metrics
+        analysis["metrics"] = {
+            "total_images": total_images,
+            "alt_text_missing": alt_text_missing,
+            "low_contrast_issues": low_contrast_issues
+        }
+        
+        # Generate issues and recommendations
+        if alt_text_missing > 0:
+            analysis["issues"].append({
+                "type": "warning",
+                "category": "accessibility",
+                "slide": "global",
+                "issue": "Missing alt text for images",
+                "description": f"{alt_text_missing} of {total_images} images lack alt text"
+            })
+            analysis["recommendations"].append("Add descriptive alt text to all images")
+        
+        if total_images > 0 and alt_text_missing == 0:
+            analysis["strengths"].append("All images have alt text")
+        
+        # Calculate accessibility score
+        score = 90
+        if total_images > 0:
+            score -= (alt_text_missing / total_images) * 30
+        score -= low_contrast_issues * 5
+        
+        analysis["score"] = max(0, min(100, score))
+        
+        if analysis["score"] < 70:
+            analysis["recommendations"].extend([
+                "Review color contrast ratios",
+                "Ensure text is readable against background colors",
+                "Consider users with visual impairments"
+            ])
+        
+        return analysis
+    
+    def _analyze_technical_quality(self, file_path: str, prs) -> Dict[str, Any]:
+        """Analyze technical aspects of the presentation"""
+        analysis = {
+            "score": 0,
+            "issues": [],
+            "strengths": [],
+            "recommendations": [],
+            "metrics": {}
+        }
+        
+        # File size analysis
+        file_size = os.path.getsize(file_path)
+        file_size_mb = file_size / (1024 * 1024)
+        
+        # Slide count analysis
+        slide_count = len(prs.slides)
+        
+        # Performance metrics
+        analysis["metrics"] = {
+            "file_size_mb": round(file_size_mb, 2),
+            "slide_count": slide_count,
+            "avg_mb_per_slide": round(file_size_mb / slide_count if slide_count > 0 else 0, 2)
+        }
+        
+        # File size issues
+        if file_size_mb > 50:
+            analysis["issues"].append({
+                "type": "warning",
+                "category": "technical",
+                "slide": "global",
+                "issue": "Large file size",
+                "description": f"File size is {file_size_mb:.1f}MB. Consider optimizing images."
+            })
+        elif file_size_mb > 100:
+            analysis["issues"].append({
+                "type": "critical",
+                "category": "technical",
+                "slide": "global",
+                "issue": "Very large file size",
+                "description": f"File size is {file_size_mb:.1f}MB. May cause performance issues."
+            })
+        
+        # Slide count analysis
+        if slide_count > 50:
+            analysis["issues"].append({
+                "type": "warning",
+                "category": "technical",
+                "slide": "global",
+                "issue": "Many slides",
+                "description": f"Presentation has {slide_count} slides. Consider breaking into multiple presentations."
+            })
+        
+        # Check for embedded objects and potential issues
+        embedded_objects = 0
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if hasattr(shape, 'chart') or hasattr(shape, 'table'):
+                    embedded_objects += 1
+        
+        analysis["metrics"]["embedded_objects"] = embedded_objects
+        
+        if embedded_objects > 20:
+            analysis["issues"].append({
+                "type": "warning",
+                "category": "technical",
+                "slide": "global",
+                "issue": "Many embedded objects",
+                "description": f"Presentation contains {embedded_objects} charts/tables. May impact performance."
+            })
+        
+        # Calculate technical score
+        score = 90
+        score -= len([i for i in analysis["issues"] if i["type"] == "critical"]) * 20
+        score -= len([i for i in analysis["issues"] if i["type"] == "warning"]) * 10
+        
+        if file_size_mb < 10 and slide_count < 30:
+            analysis["strengths"].append("Optimized file size and slide count")
+            score += 10
+        
+        analysis["score"] = max(0, min(100, score))
+        
+        if analysis["score"] < 70:
+            analysis["recommendations"].extend([
+                "Optimize images to reduce file size",
+                "Consider splitting large presentations",
+                "Remove unused templates and masters"
+            ])
+        
+        return analysis
+    
+    def _calculate_critique_summary(self, critique_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate overall summary metrics for the critique"""
+        issues = critique_results["issues"]
+        recommendations = critique_results["recommendations"]
+        
+        # Count issue types
+        critical_issues = len([i for i in issues if i.get("type") == "critical"])
+        warnings = len([i for i in issues if i.get("type") == "warning"])
+        
+        # Calculate overall score
+        detailed_analysis = critique_results["detailed_analysis"]
+        scores = [analysis.get("score", 0) for analysis in detailed_analysis.values()]
+        overall_score = sum(scores) / len(scores) if scores else 0
+        
+        # Update summary
+        critique_results["summary"].update({
+            "overall_score": round(overall_score, 1),
+            "critical_issues": critical_issues,
+            "warnings": warnings,
+            "recommendations": len(set(recommendations)),  # Deduplicate recommendations
+            "analysis_categories": list(detailed_analysis.keys())
+        })
+        
+        # Add overall assessment
+        if overall_score >= 80:
+            critique_results["summary"]["assessment"] = "Excellent"
+        elif overall_score >= 70:
+            critique_results["summary"]["assessment"] = "Good"
+        elif overall_score >= 60:
+            critique_results["summary"]["assessment"] = "Fair"
+        else:
+            critique_results["summary"]["assessment"] = "Needs Improvement"
+        
+        return critique_results
+
+    async def critique_presentation_async(self, file_path: str, critique_type: str = "comprehensive", 
+                                        include_screenshots: bool = True, output_dir: Optional[str] = None) -> Dict[str, Any]:
+        """Async wrapper for critique_presentation"""
+        return await asyncio.to_thread(self.critique_presentation, file_path, critique_type, include_screenshots, output_dir)
+
 # Global PowerPoint manager instance
 ppt_manager = PowerPointManager()
 
@@ -2360,6 +2895,35 @@ async def handle_list_tools() -> List[Tool]:
                         "type": "integer",
                         "description": "Screenshot height in pixels",  
                         "default": 1080
+                    }
+                },
+                "required": ["file_path"]
+            }
+        ),
+        Tool(
+            name="critique_presentation",
+            description="Analyze and critique a PowerPoint presentation for design, content, accessibility, and technical issues",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the PowerPoint file to analyze"
+                    },
+                    "critique_type": {
+                        "type": "string",
+                        "enum": ["design", "content", "accessibility", "technical", "comprehensive"],
+                        "default": "comprehensive",
+                        "description": "Type of critique to perform"
+                    },
+                    "include_screenshots": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Whether to generate screenshots for visual analysis"
+                    },
+                    "output_dir": {
+                        "type": "string",
+                        "description": "Directory to save screenshots if generated (optional)"
                     }
                 },
                 "required": ["file_path"]
@@ -3105,6 +3669,82 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
                 text=f"Successfully created {len(screenshot_paths)} slide screenshots.\n" +
                      json.dumps(result_info, indent=2)
             )]
+        
+        elif name == "critique_presentation":
+            file_path = arguments["file_path"]
+            critique_type = arguments.get("critique_type", "comprehensive")
+            include_screenshots = arguments.get("include_screenshots", True)
+            output_dir = arguments.get("output_dir")
+            
+            critique_results = await ppt_manager.critique_presentation_async(
+                file_path, critique_type, include_screenshots, output_dir
+            )
+            
+            # Format the critique results for display
+            summary = critique_results["summary"]
+            response_text = f"""🔍 Presentation Critique Complete
+
+📊 Overall Assessment: {summary['assessment']} (Score: {summary['overall_score']}/100)
+📈 Total Slides: {summary['total_slides']}
+🔴 Critical Issues: {summary['critical_issues']}
+⚠️  Warnings: {summary['warnings']}
+💡 Recommendations: {summary['recommendations']}
+
+Analysis Categories: {', '.join(summary['analysis_categories'])}
+
+"""
+            
+            # Add issue details
+            if critique_results["issues"]:
+                response_text += "\n🚨 Issues Found:\n"
+                for issue in critique_results["issues"][:10]:  # Limit to first 10 issues
+                    emoji = "🔴" if issue["type"] == "critical" else "⚠️"
+                    slide_info = f"Slide {issue['slide']}" if issue['slide'] != 'global' else "Global"
+                    response_text += f"{emoji} {slide_info}: {issue['issue']} - {issue['description']}\n"
+                
+                if len(critique_results["issues"]) > 10:
+                    response_text += f"... and {len(critique_results['issues']) - 10} more issues\n"
+            
+            # Add strengths
+            if critique_results["strengths"]:
+                response_text += "\n✅ Strengths:\n"
+                for strength in critique_results["strengths"][:5]:
+                    response_text += f"• {strength}\n"
+            
+            # Add top recommendations
+            if critique_results["recommendations"]:
+                response_text += "\n💡 Top Recommendations:\n"
+                unique_recommendations = list(set(critique_results["recommendations"]))
+                for rec in unique_recommendations[:5]:
+                    response_text += f"• {rec}\n"
+            
+            # Add screenshot info if generated
+            if critique_results.get("screenshots"):
+                response_text += f"\n📸 Screenshots: {len(critique_results['screenshots'])} images generated\n"
+            
+            response_text += f"\n📋 Full detailed analysis available in JSON format below:\n"
+            
+            response = [
+                TextContent(
+                    type="text",
+                    text=response_text
+                ),
+                TextContent(
+                    type="text",
+                    text=json.dumps(critique_results, indent=2, default=str)
+                )
+            ]
+            
+            # Add screenshot references if generated
+            if critique_results.get("screenshots"):
+                for screenshot_path in critique_results["screenshots"]:
+                    if os.path.exists(screenshot_path):
+                        response.append(EmbeddedResource(
+                            uri=f"file://{os.path.abspath(screenshot_path)}",
+                            mimeType="image/png"
+                        ))
+            
+            return response
         
         elif name == "analyze_presentation_style":
             file_path = arguments["file_path"]
