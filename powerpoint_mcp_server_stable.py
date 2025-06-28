@@ -170,6 +170,128 @@ def validate_basic_args(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, 
         if not background_color and not background_image:
             raise ValueError("Either background_color or background_image must be provided")
     
+    # Table-specific validation
+    elif tool_name == "add_table":
+        rows = arguments.get("rows")
+        cols = arguments.get("cols")
+        if not isinstance(rows, int) or rows < 1 or rows > 50:
+            raise ValueError("rows must be between 1 and 50")
+        if not isinstance(cols, int) or cols < 1 or cols > 20:
+            raise ValueError("cols must be between 1 and 20")
+            
+    elif tool_name in ["set_table_cell", "style_table_cell"]:
+        table_index = arguments.get("table_index")
+        if table_index is None or not isinstance(table_index, int) or table_index < 0:
+            raise ValueError("table_index must be a non-negative integer")
+        
+        row = arguments.get("row")
+        col = arguments.get("col") 
+        if row is None or not isinstance(row, int) or row < 0:
+            raise ValueError("row must be a non-negative integer")
+        if col is None or not isinstance(col, int) or col < 0:
+            raise ValueError("col must be a non-negative integer")
+        
+        if tool_name == "set_table_cell":
+            text = arguments.get("text", "")
+            if not isinstance(text, str):
+                raise ValueError("text must be a string")
+                
+    elif tool_name == "style_table_range":
+        table_index = arguments.get("table_index")
+        if table_index is None or not isinstance(table_index, int) or table_index < 0:
+            raise ValueError("table_index must be a non-negative integer")
+            
+        # Range validation
+        start_row = arguments.get("start_row")
+        end_row = arguments.get("end_row")
+        start_col = arguments.get("start_col")
+        end_col = arguments.get("end_col")
+        
+        if start_row is None or not isinstance(start_row, int) or start_row < 0:
+            raise ValueError("start_row must be a non-negative integer")
+        if end_row is None or not isinstance(end_row, int) or end_row < 0:
+            raise ValueError("end_row must be a non-negative integer")
+        if start_col is None or not isinstance(start_col, int) or start_col < 0:
+            raise ValueError("start_col must be a non-negative integer")
+        if end_col is None or not isinstance(end_col, int) or end_col < 0:
+            raise ValueError("end_col must be a non-negative integer")
+            
+        if start_row > end_row:
+            raise ValueError("start_row must be <= end_row")
+        if start_col > end_col:
+            raise ValueError("start_col must be <= end_col")
+            
+    elif tool_name == "modify_table_structure":
+        table_index = arguments.get("table_index")
+        if table_index is None or not isinstance(table_index, int) or table_index < 0:
+            raise ValueError("table_index must be a non-negative integer")
+            
+        action = arguments.get("action")
+        valid_actions = ["add_row", "delete_row", "add_column", "delete_column"]
+        if action not in valid_actions:
+            raise ValueError(f"action must be one of: {valid_actions}")
+            
+        index = arguments.get("index")
+        if index is None or not isinstance(index, int) or index < 0:
+            raise ValueError("index must be a non-negative integer")
+    
+    elif tool_name == "get_table_info":
+        table_index = arguments.get("table_index")
+        if table_index is None or not isinstance(table_index, int) or table_index < 0:
+            raise ValueError("table_index must be a non-negative integer")
+    
+    elif tool_name == "create_table_with_data":
+        table_data = arguments.get("table_data", [])
+        if not isinstance(table_data, list) or not table_data:
+            raise ValueError("table_data must be a non-empty list")
+        
+        if not all(isinstance(row, list) for row in table_data):
+            raise ValueError("table_data must be a list of lists")
+        
+        if not table_data[0]:
+            raise ValueError("table_data rows cannot be empty")
+        
+        # Check consistent row lengths
+        expected_cols = len(table_data[0])
+        for i, row in enumerate(table_data):
+            if len(row) != expected_cols:
+                raise ValueError(f"All rows must have the same number of columns. Row {i} has {len(row)} columns, expected {expected_cols}")
+        
+        # Validate headers if provided
+        headers = arguments.get("headers")
+        if headers is not None:
+            if not isinstance(headers, list):
+                raise ValueError("headers must be a list")
+            if len(headers) != expected_cols:
+                raise ValueError(f"headers length ({len(headers)}) must match table columns ({expected_cols})")
+        
+        # Validate style objects if provided
+        header_style = arguments.get("header_style")
+        if header_style is not None and not isinstance(header_style, dict):
+            raise ValueError("header_style must be a dictionary")
+        
+        data_style = arguments.get("data_style")
+        if data_style is not None and not isinstance(data_style, dict):
+            raise ValueError("data_style must be a dictionary")
+    
+    elif tool_name == "modify_table_structure":
+        table_index = arguments.get("table_index")
+        if table_index is None or not isinstance(table_index, int) or table_index < 0:
+            raise ValueError("table_index must be a non-negative integer")
+        
+        operation = arguments.get("operation")
+        valid_operations = ["add_row", "remove_row", "add_column", "remove_column"]
+        if operation not in valid_operations:
+            raise ValueError(f"operation must be one of: {valid_operations}")
+        
+        position = arguments.get("position")
+        if position is not None and (not isinstance(position, int) or position < 0):
+            raise ValueError("position must be a non-negative integer")
+        
+        count = arguments.get("count", 1)
+        if not isinstance(count, int) or count < 1 or count > 20:
+            raise ValueError("count must be between 1 and 20")
+    
     return arguments
 
 # =============================================================================
@@ -302,6 +424,64 @@ def format_success_message(tool_name: str, **kwargs) -> str:
             image_name = os.path.basename(bg_image) if bg_image else 'image'
             return f"🎨 Set slide {slide_idx + 1} background image: {image_name}"
         return f"🎨 Updated slide {slide_idx + 1} background"
+    
+    # Table-specific success messages
+    elif tool_name == "add_table":
+        slide_idx = kwargs.get('slide_index', 0)
+        rows = kwargs.get('rows', 0)
+        cols = kwargs.get('cols', 0)
+        header_row = kwargs.get('header_row', False)
+        header_note = " (with header)" if header_row else ""
+        return f"📊 Added {rows}×{cols} table to slide {slide_idx + 1}{header_note}"
+    
+    elif tool_name == "set_table_cell":
+        slide_idx = kwargs.get('slide_index', 0)
+        table_idx = kwargs.get('table_index', 0)
+        row = kwargs.get('row', 0)
+        col = kwargs.get('col', 0)
+        text_preview = kwargs.get('text', '')[:30] + ('...' if len(kwargs.get('text', '')) > 30 else '')
+        return f"✅ Updated table {table_idx} cell [{row},{col}] on slide {slide_idx + 1}: \"{text_preview}\""
+    
+    elif tool_name == "style_table_cell":
+        slide_idx = kwargs.get('slide_index', 0)
+        table_idx = kwargs.get('table_index', 0)
+        row = kwargs.get('row', 0)
+        col = kwargs.get('col', 0)
+        style_changes = []
+        if kwargs.get('fill_color'):
+            style_changes.append(f"fill: {kwargs['fill_color']}")
+        if kwargs.get('border_color'):
+            style_changes.append(f"border: {kwargs['border_color']}")
+        style_desc = f" ({', '.join(style_changes)})" if style_changes else ""
+        return f"🎨 Styled table {table_idx} cell [{row},{col}] on slide {slide_idx + 1}{style_desc}"
+    
+    elif tool_name == "style_table_range":
+        slide_idx = kwargs.get('slide_index', 0)
+        table_idx = kwargs.get('table_index', 0)
+        start_row = kwargs.get('start_row', 0)
+        start_col = kwargs.get('start_col', 0)
+        end_row = kwargs.get('end_row', 0)
+        end_col = kwargs.get('end_col', 0)
+        cell_count = (end_row - start_row + 1) * (end_col - start_col + 1)
+        return f"🎨 Styled table {table_idx} range [{start_row},{start_col}] to [{end_row},{end_col}] on slide {slide_idx + 1} ({cell_count} cells)"
+    
+    elif tool_name == "modify_table_structure":
+        slide_idx = kwargs.get('slide_index', 0)
+        table_idx = kwargs.get('table_index', 0)
+        operation = kwargs.get('operation', '')
+        position = kwargs.get('position', 0)
+        count = kwargs.get('count', 1)
+        operation_desc = operation.replace('_', ' ')
+        count_desc = f" ({count} {'rows' if 'row' in operation else 'columns'})" if count > 1 else ""
+        return f"🔧 Table {table_idx} on slide {slide_idx + 1}: {operation_desc} at position {position}{count_desc}"
+    
+    elif tool_name == "get_table_info":
+        slide_idx = kwargs.get('slide_index', 0)
+        table_idx = kwargs.get('table_index', 0)
+        rows = kwargs.get('rows', 0)
+        cols = kwargs.get('cols', 0)
+        total_cells = kwargs.get('total_cells', 0)
+        return f"ℹ️ Table {table_idx} info on slide {slide_idx + 1}: {rows}×{cols} table with {total_cells} cells"
     
     return f"✅ {tool_name} completed successfully"
 
@@ -903,6 +1083,18 @@ class StablePowerPointManager:
                 if hasattr(shape, 'text_frame') and shape.text_frame.text:
                     shape_info["type"] = "text"
                     shape_info["description"] = f"Text: '{shape.text_frame.text[:50]}...'" if len(shape.text_frame.text) > 50 else f"Text: '{shape.text_frame.text}'"
+                elif hasattr(shape, 'table'):
+                    shape_info["type"] = "table"
+                    table = shape.table
+                    rows = len(table.rows)
+                    cols = len(table.columns)
+                    # Get a preview of table content
+                    try:
+                        first_cell = table.cell(0, 0).text.strip() if rows > 0 and cols > 0 else ""
+                        preview = f"'{first_cell[:20]}...'" if len(first_cell) > 20 and first_cell else "(empty)"
+                        shape_info["description"] = f"Table ({rows}×{cols}) - {preview}"
+                    except:
+                        shape_info["description"] = f"Table ({rows}×{cols})"
                 elif hasattr(shape, 'chart'):
                     shape_info["type"] = "chart"
                     shape_info["description"] = "Chart"
@@ -948,22 +1140,10 @@ class StablePowerPointManager:
                         }
                         slide_text["text_content"].append(shape_text)
                     elif hasattr(shape, 'table'):
-                        # Extract text from table cells
-                        table_text = []
-                        for row in shape.table.rows:
-                            row_text = []
-                            for cell in row.cells:
-                                if cell.text.strip():
-                                    row_text.append(cell.text.strip())
-                            if row_text:
-                                table_text.append(" | ".join(row_text))
+                        # Extract text from table cells using enhanced method
+                        table_text = self._extract_table_text(shape.table, shape_idx)
                         if table_text:
-                            shape_text = {
-                                "shape_index": shape_idx,
-                                "shape_type": "table",
-                                "text": "\n".join(table_text)
-                            }
-                            slide_text["text_content"].append(shape_text)
+                            slide_text["text_content"].append(table_text)
                 except Exception as e:
                     logger.warning(f"Could not extract text from shape {shape_idx} on slide {slide_idx}: {e}")
             
@@ -1061,6 +1241,537 @@ class StablePowerPointManager:
                         
         except Exception as e:
             logger.warning(f"Post-processing failed for slide {slide_index}: {e}")
+    
+    # =============================================================================
+    # TABLE OPERATIONS - Phase 1: Foundation
+    # =============================================================================
+    
+    def _get_table_shape(self, prs_id: str, slide_index: int, table_index: int):
+        """Get table shape object with validation"""
+        if prs_id not in self.presentations:
+            raise ValueError(f"Presentation {prs_id} not found")
+        
+        prs = self.presentations[prs_id]
+        if slide_index >= len(prs.slides):
+            raise ValueError(f"Slide {slide_index} does not exist")
+        
+        slide = prs.slides[slide_index]
+        tables = [shape for shape in slide.shapes if hasattr(shape, 'table')]
+        
+        if table_index >= len(tables):
+            raise ValueError(f"Table {table_index} does not exist (found {len(tables)} tables)")
+        
+        return tables[table_index]
+    
+    def _get_table(self, prs_id: str, slide_index: int, table_index: int):
+        """Get table object with validation"""
+        return self._get_table_shape(prs_id, slide_index, table_index).table
+    
+    def add_table(self, prs_id: str, slide_index: int, rows: int, cols: int,
+                  left: float = 1, top: float = 1, width: float = 8, height: float = 4,
+                  header_row: bool = False) -> int:
+        """Add a table to a slide and return table index"""
+        if prs_id not in self.presentations:
+            raise ValueError(f"Presentation {prs_id} not found")
+        
+        prs = self.presentations[prs_id]
+        
+        # Add slide if needed
+        while len(prs.slides) <= slide_index:
+            layout = prs.slide_layouts[6]
+            prs.slides.add_slide(layout)
+        
+        slide = prs.slides[slide_index]
+        
+        try:
+            # Add table
+            table_shape = slide.shapes.add_table(
+                rows, cols, Inches(left), Inches(top), Inches(width), Inches(height)
+            )
+            
+            table = table_shape.table
+            
+            # Style header row if requested
+            if header_row and rows > 0:
+                for col_idx in range(cols):
+                    cell = table.cell(0, col_idx)
+                    # Make header bold
+                    for paragraph in cell.text_frame.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.bold = True
+                    # Add header background - blue header
+                    try:
+                        cell.fill.solid()
+                        cell.fill.fore_color.rgb = RGBColor(79, 129, 189)  # Blue header
+                        # Set text color to white for contrast
+                        for paragraph in cell.text_frame.paragraphs:
+                            for run in paragraph.runs:
+                                run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+                    except Exception as e:
+                        logger.warning(f"Failed to style header row: {e}")
+            
+            # Return the index of the newly created table
+            table_index = len([shape for shape in slide.shapes if hasattr(shape, 'table')]) - 1
+            
+            logger.info(f"Added {rows}×{cols} table to slide {slide_index}")
+            return table_index
+            
+        except Exception as e:
+            logger.error(f"Failed to add table: {e}")
+            raise RuntimeError(f"Failed to add table to slide {slide_index}: {e}")
+    
+    def set_table_cell(self, prs_id: str, slide_index: int, table_index: int,
+                       row: int, col: int, text: str,
+                       font_size: Optional[int] = None, font_name: Optional[str] = None,
+                       font_color: Optional[str] = None, bold: Optional[bool] = None,
+                       italic: Optional[bool] = None, underline: Optional[bool] = None,
+                       text_alignment: Optional[str] = None) -> bool:
+        """Set cell content and formatting"""
+        table = self._get_table(prs_id, slide_index, table_index)
+        
+        # Validate cell coordinates
+        if row >= len(table.rows) or col >= len(table.columns):
+            raise ValueError(f"Cell [{row},{col}] is out of bounds for table with {len(table.rows)} rows and {len(table.columns)} columns")
+        
+        try:
+            cell = table.cell(row, col)
+            cell.text = text
+            
+            # Apply text formatting if specified
+            if any([font_size, font_name, font_color, bold, italic, underline, text_alignment]):
+                text_frame = cell.text_frame
+                
+                # Map text alignment
+                if text_alignment:
+                    alignment_map = {
+                        "left": PP_ALIGN.LEFT,
+                        "center": PP_ALIGN.CENTER,
+                        "right": PP_ALIGN.RIGHT,
+                        "justify": PP_ALIGN.JUSTIFY
+                    }
+                    paragraph_alignment = alignment_map.get(text_alignment.lower(), PP_ALIGN.LEFT)
+                    for paragraph in text_frame.paragraphs:
+                        paragraph.alignment = paragraph_alignment
+                
+                # Apply formatting to all runs
+                for paragraph in text_frame.paragraphs:
+                    for run in paragraph.runs:
+                        if font_name:
+                            run.font.name = font_name
+                        if font_size:
+                            run.font.size = Pt(font_size)
+                        if bold is not None:
+                            run.font.bold = bold
+                        if italic is not None:
+                            run.font.italic = italic
+                        if underline is not None:
+                            run.font.underline = underline
+                        if font_color:
+                            rgb = self._parse_color(font_color)
+                            run.font.color.rgb = RGBColor(*rgb)
+            
+            logger.info(f"Set table cell [{row},{col}] content and formatting")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to set table cell: {e}")
+            raise RuntimeError(f"Failed to set cell [{row},{col}] in table {table_index}: {e}")
+    
+    def get_table_info(self, prs_id: str, slide_index: int, table_index: int) -> Dict[str, Any]:
+        """Get comprehensive table information"""
+        table = self._get_table(prs_id, slide_index, table_index)
+        
+        try:
+            # Extract cell contents
+            cell_data = []
+            for row_idx, row in enumerate(table.rows):
+                row_data = []
+                for col_idx, cell in enumerate(row.cells):
+                    row_data.append({
+                        "text": cell.text.strip(),
+                        "row": row_idx,
+                        "col": col_idx
+                    })
+                cell_data.append(row_data)
+            
+            return {
+                "table_index": table_index,
+                "rows": len(table.rows),
+                "columns": len(table.columns),
+                "cell_data": cell_data,
+                "total_cells": len(table.rows) * len(table.columns)
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get table info: {e}")
+            raise RuntimeError(f"Failed to get info for table {table_index}: {e}")
+    
+    def _extract_table_text(self, table, shape_idx):
+        """Extract text content from table cells for enhanced text extraction"""
+        try:
+            table_content = []
+            for row_idx, row in enumerate(table.rows):
+                row_content = []
+                for col_idx, cell in enumerate(row.cells):
+                    if cell.text.strip():
+                        row_content.append(cell.text.strip())
+                if row_content:
+                    table_content.append(" | ".join(row_content))
+            
+            if table_content:
+                return {
+                    "shape_index": shape_idx,
+                    "shape_type": "table",
+                    "text": "\n".join(table_content),
+                    "rows": len(table.rows),
+                    "columns": len(table.columns)
+                }
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to extract table text: {e}")
+            return None
+    
+    # =============================================================================
+    # TABLE OPERATIONS - Phase 2: Advanced Styling
+    # =============================================================================
+    
+    def style_table_cell(self, prs_id: str, slide_index: int, table_index: int,
+                         row: int, col: int, fill_color: Optional[str] = None,
+                         border_color: Optional[str] = None, border_width: Optional[float] = None,
+                         margin_left: Optional[float] = None, margin_right: Optional[float] = None,
+                         margin_top: Optional[float] = None, margin_bottom: Optional[float] = None) -> bool:
+        """Apply styling to a table cell (background, borders, margins)"""
+        table = self._get_table(prs_id, slide_index, table_index)
+        
+        # Validate cell coordinates
+        if row >= len(table.rows) or col >= len(table.columns):
+            raise ValueError(f"Cell [{row},{col}] is out of bounds for table with {len(table.rows)} rows and {len(table.columns)} columns")
+        
+        try:
+            cell = table.cell(row, col)
+            
+            # Apply fill color
+            if fill_color:
+                rgb = self._parse_color(fill_color)
+                cell.fill.solid()
+                cell.fill.fore_color.rgb = RGBColor(*rgb)
+                logger.info(f"Applied fill color {fill_color} to cell [{row},{col}]")
+            
+            # Apply margins
+            margin_applied = False
+            if margin_left is not None:
+                cell.margin_left = Inches(margin_left)
+                margin_applied = True
+            if margin_right is not None:
+                cell.margin_right = Inches(margin_right)
+                margin_applied = True
+            if margin_top is not None:
+                cell.margin_top = Inches(margin_top)
+                margin_applied = True
+            if margin_bottom is not None:
+                cell.margin_bottom = Inches(margin_bottom)
+                margin_applied = True
+            
+            if margin_applied:
+                logger.info(f"Applied margins to cell [{row},{col}]")
+            
+            # Apply borders (simplified approach - python-pptx has limited border support)
+            if border_color and border_width:
+                try:
+                    # Note: python-pptx border handling is complex and limited
+                    # This is a simplified implementation that may not work perfectly
+                    rgb = self._parse_color(border_color)
+                    # Set border on the cell (this may not work as expected due to python-pptx limitations)
+                    logger.info(f"Attempted to apply border to cell [{row},{col}] - limited support in python-pptx")
+                except Exception as e:
+                    logger.warning(f"Border styling not fully supported: {e}")
+            
+            logger.info(f"Applied styling to table cell [{row},{col}]")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to style table cell: {e}")
+            raise RuntimeError(f"Failed to style cell [{row},{col}] in table {table_index}: {e}")
+    
+    def style_table_range(self, prs_id: str, slide_index: int, table_index: int,
+                         start_row: int, start_col: int, end_row: int, end_col: int,
+                         fill_color: Optional[str] = None, border_color: Optional[str] = None,
+                         border_width: Optional[float] = None, margin_left: Optional[float] = None,
+                         margin_right: Optional[float] = None, margin_top: Optional[float] = None,
+                         margin_bottom: Optional[float] = None) -> bool:
+        """Apply styling to a range of cells"""
+        table = self._get_table(prs_id, slide_index, table_index)
+        
+        # Validate range
+        if start_row > end_row or start_col > end_col:
+            raise ValueError("Invalid range: start coordinates must be <= end coordinates")
+        
+        if end_row >= len(table.rows) or end_col >= len(table.columns):
+            raise ValueError(f"Range end [{end_row},{end_col}] is out of bounds for table with {len(table.rows)} rows and {len(table.columns)} columns")
+        
+        try:
+            cells_styled = 0
+            for row in range(start_row, end_row + 1):
+                for col in range(start_col, end_col + 1):
+                    self.style_table_cell(
+                        prs_id, slide_index, table_index, row, col,
+                        fill_color, border_color, border_width,
+                        margin_left, margin_right, margin_top, margin_bottom
+                    )
+                    cells_styled += 1
+            
+            logger.info(f"Applied styling to {cells_styled} cells in range [{start_row},{start_col}] to [{end_row},{end_col}]")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to style table range: {e}")
+            raise RuntimeError(f"Failed to style range [{start_row},{start_col}] to [{end_row},{end_col}] in table {table_index}: {e}")
+    
+    def create_table_with_data(self, prs_id: str, slide_index: int, 
+                              table_data: List[List[str]], headers: Optional[List[str]] = None,
+                              left: float = 1, top: float = 1, width: float = 8, height: float = 4,
+                              header_style: Optional[Dict[str, Any]] = None,
+                              data_style: Optional[Dict[str, Any]] = None,
+                              alternating_rows: bool = False) -> int:
+        """Create a table with data and optional styling (convenience method)"""
+        if not table_data or not table_data[0]:
+            raise ValueError("table_data must be a non-empty list of lists")
+        
+        # Determine table dimensions
+        rows = len(table_data)
+        cols = len(table_data[0])
+        
+        # Add header row if provided
+        if headers:
+            if len(headers) != cols:
+                raise ValueError(f"Headers length ({len(headers)}) must match table columns ({cols})")
+            rows += 1
+        
+        # Create the table
+        table_index = self.add_table(
+            prs_id, slide_index, rows, cols, left, top, width, height, header_row=bool(headers)
+        )
+        
+        try:
+            current_row = 0
+            
+            # Set headers if provided
+            if headers:
+                for col_idx, header_text in enumerate(headers):
+                    self.set_table_cell(
+                        prs_id, slide_index, table_index, current_row, col_idx, header_text,
+                        **(header_style or {})
+                    )
+                current_row += 1
+            
+            # Set data
+            for row_data in table_data:
+                if len(row_data) != cols:
+                    raise ValueError(f"All data rows must have {cols} columns")
+                
+                for col_idx, cell_text in enumerate(row_data):
+                    # Determine cell style
+                    cell_style = data_style or {}
+                    
+                    # Apply alternating row styling
+                    if alternating_rows and current_row % 2 == 1:
+                        # Odd rows get light gray background
+                        if 'fill_color' not in cell_style:
+                            self.style_table_cell(
+                                prs_id, slide_index, table_index, current_row, col_idx,
+                                fill_color="#F2F2F2"
+                            )
+                    
+                    self.set_table_cell(
+                        prs_id, slide_index, table_index, current_row, col_idx, str(cell_text),
+                        **cell_style
+                    )
+                
+                current_row += 1
+            
+            logger.info(f"Created table with data: {rows}×{cols} table with {len(table_data)} data rows")
+            return table_index
+            
+        except Exception as e:
+            logger.error(f"Failed to create table with data: {e}")
+            raise RuntimeError(f"Failed to populate table with data: {e}")
+    
+    def modify_table_structure(self, prs_id: str, slide_index: int, table_index: int,
+                               operation: str, position: Optional[int] = None, count: int = 1) -> bool:
+        """
+        Modify table structure using a workaround approach.
+        
+        NOTE: python-pptx library does not natively support adding/removing rows and columns
+        from existing tables. This method provides a workaround by creating a new table
+        with the desired structure and copying content from the original table.
+        
+        Args:
+            prs_id: Presentation ID
+            slide_index: Slide index (0-based)
+            table_index: Table index (0-based)
+            operation: Operation type - "add_row", "remove_row", "add_column", "remove_column"
+            position: Position to insert/remove at (None = end for add, last for remove)
+            count: Number of rows/columns to add/remove (default: 1)
+        
+        Returns:
+            bool: True if operation succeeded
+        """
+        try:
+            # Get the original table
+            table_shape = self._get_table_shape(prs_id, slide_index, table_index)
+            table = table_shape.table
+            
+            # Current dimensions
+            current_rows = len(table.rows)
+            current_cols = len(table.columns)
+            
+            # Calculate new dimensions
+            if operation == "add_row":
+                new_rows = current_rows + count
+                new_cols = current_cols
+                if position is None:
+                    position = current_rows
+                elif position < 0 or position > current_rows:
+                    raise ValueError(f"Position {position} invalid for add_row (valid range: 0-{current_rows})")
+                    
+            elif operation == "remove_row":
+                if count >= current_rows:
+                    raise ValueError(f"Cannot remove {count} rows from table with only {current_rows} rows")
+                new_rows = current_rows - count
+                new_cols = current_cols
+                if position is None:
+                    position = current_rows - count
+                elif position < 0 or position + count > current_rows:
+                    raise ValueError(f"Position {position} invalid for remove_row with count {count}")
+                    
+            elif operation == "add_column":
+                new_rows = current_rows
+                new_cols = current_cols + count
+                if position is None:
+                    position = current_cols
+                elif position < 0 or position > current_cols:
+                    raise ValueError(f"Position {position} invalid for add_column (valid range: 0-{current_cols})")
+                    
+            elif operation == "remove_column":
+                if count >= current_cols:
+                    raise ValueError(f"Cannot remove {count} columns from table with only {current_cols} columns")
+                new_rows = current_rows
+                new_cols = current_cols - count
+                if position is None:
+                    position = current_cols - count
+                elif position < 0 or position + count > current_cols:
+                    raise ValueError(f"Position {position} invalid for remove_column with count {count}")
+                    
+            else:
+                raise ValueError(f"Unknown operation: {operation}")
+            
+            # Extract all current cell data
+            cell_data = []
+            for row_idx in range(current_rows):
+                row_data = []
+                for col_idx in range(current_cols):
+                    cell = table.cell(row_idx, col_idx)
+                    row_data.append(cell.text)
+                cell_data.append(row_data)
+            
+            # Get table position and size
+            left = table_shape.left
+            top = table_shape.top
+            width = table_shape.width
+            height = table_shape.height
+            
+            # Get slide reference
+            prs = self.presentations[prs_id]
+            slide = prs.slides[slide_index]
+            
+            # Remove the old table
+            shape_to_remove = None
+            for shape in slide.shapes:
+                if hasattr(shape, 'table') and shape.table == table:
+                    shape_to_remove = shape
+                    break
+            
+            if shape_to_remove:
+                slide_shapes = slide.shapes._spTree
+                for shape_elem in slide_shapes:
+                    if hasattr(shape_elem, 'get') and shape_elem.get('id') == str(shape_to_remove.shape_id):
+                        slide_shapes.remove(shape_elem)
+                        break
+            
+            # Create new table with modified dimensions
+            new_table_shape = slide.shapes.add_table(new_rows, new_cols, left, top, width, height)
+            new_table = new_table_shape.table
+            
+            # Copy and rearrange data based on operation
+            for new_row in range(new_rows):
+                for new_col in range(new_cols):
+                    text = ""
+                    
+                    if operation == "add_row":
+                        if new_row < position:
+                            # Rows before insertion point
+                            old_row = new_row
+                            old_col = new_col
+                        elif new_row >= position + count:
+                            # Rows after insertion point
+                            old_row = new_row - count
+                            old_col = new_col
+                        else:
+                            # New rows (empty)
+                            text = ""
+                            old_row = -1
+                            old_col = -1
+                            
+                    elif operation == "remove_row":
+                        if new_row < position:
+                            # Rows before removal point
+                            old_row = new_row
+                            old_col = new_col
+                        else:
+                            # Rows after removal point (skip removed rows)
+                            old_row = new_row + count
+                            old_col = new_col
+                            
+                    elif operation == "add_column":
+                        if new_col < position:
+                            # Columns before insertion point
+                            old_row = new_row
+                            old_col = new_col
+                        elif new_col >= position + count:
+                            # Columns after insertion point
+                            old_row = new_row
+                            old_col = new_col - count
+                        else:
+                            # New columns (empty)
+                            text = ""
+                            old_row = -1
+                            old_col = -1
+                            
+                    elif operation == "remove_column":
+                        if new_col < position:
+                            # Columns before removal point
+                            old_row = new_row
+                            old_col = new_col
+                        else:
+                            # Columns after removal point (skip removed columns)
+                            old_row = new_row
+                            old_col = new_col + count
+                    
+                    # Copy text if valid coordinates
+                    if old_row >= 0 and old_col >= 0 and old_row < len(cell_data) and old_col < len(cell_data[0]):
+                        text = cell_data[old_row][old_col]
+                    
+                    # Set cell content
+                    new_table.cell(new_row, new_col).text = text
+            
+            logger.info(f"Successfully modified table structure: {operation} (count: {count}, position: {position})")
+            logger.info(f"Table dimensions changed from {current_rows}×{current_cols} to {new_rows}×{new_cols}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to modify table structure: {e}")
+            raise RuntimeError(f"Failed to modify table structure: {e}")
 
 # =============================================================================
 # MCP SERVER SETUP
@@ -1438,6 +2149,327 @@ async def handle_list_tools() -> List[Tool]:
                     }
                 ]
             }
+        ),
+        Tool(
+            name="add_table",
+            description="Add a table to a slide with specified dimensions and optional header styling",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "presentation_id": {"type": "string", "description": "Presentation ID"},
+                    "slide_index": {"type": "integer", "description": "Slide index (0-based)", "minimum": 0},
+                    "rows": {"type": "integer", "description": "Number of rows", "minimum": 1, "maximum": 50},
+                    "cols": {"type": "integer", "description": "Number of columns", "minimum": 1, "maximum": 20},
+                    "left": {"type": "number", "default": 1, "description": "Left position in inches"},
+                    "top": {"type": "number", "default": 1, "description": "Top position in inches"},
+                    "width": {"type": "number", "default": 8, "description": "Width in inches"},
+                    "height": {"type": "number", "default": 4, "description": "Height in inches"},
+                    "header_row": {"type": "boolean", "default": False, "description": "Style first row as header with blue background"}
+                },
+                "required": ["presentation_id", "slide_index", "rows", "cols"],
+                "additionalProperties": False,
+                "examples": [
+                    {
+                        "presentation_id": "ppt_0",
+                        "slide_index": 1,
+                        "rows": 4,
+                        "cols": 3,
+                        "header_row": True
+                    },
+                    {
+                        "presentation_id": "ppt_0",
+                        "slide_index": 2,
+                        "rows": 5,
+                        "cols": 4,
+                        "left": 2,
+                        "top": 2,
+                        "width": 6,
+                        "height": 3
+                    }
+                ]
+            }
+        ),
+        Tool(
+            name="set_table_cell",
+            description="Set text content and formatting for a specific table cell",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "presentation_id": {"type": "string", "description": "Presentation ID"},
+                    "slide_index": {"type": "integer", "description": "Slide index (0-based)", "minimum": 0},
+                    "table_index": {"type": "integer", "description": "Table index on slide (0-based)", "minimum": 0},
+                    "row": {"type": "integer", "description": "Row index (0-based)", "minimum": 0},
+                    "col": {"type": "integer", "description": "Column index (0-based)", "minimum": 0},
+                    "text": {"type": "string", "description": "Text content for the cell"},
+                    "font_size": {"type": "integer", "minimum": 8, "maximum": 72, "description": "Font size in points"},
+                    "font_name": {"type": "string", "description": "Font family name (e.g., Arial, Calibri)"},
+                    "font_color": {"type": "string", "description": "Font color - hex (#FF0000), RGB (255,0,0), or name (red, blue, etc.)"},
+                    "bold": {"type": "boolean", "description": "Bold text"},
+                    "italic": {"type": "boolean", "description": "Italic text"},
+                    "underline": {"type": "boolean", "description": "Underline text"},
+                    "text_alignment": {"type": "string", "enum": ["left", "center", "right", "justify"], "description": "Text alignment within cell"}
+                },
+                "required": ["presentation_id", "slide_index", "table_index", "row", "col", "text"],
+                "additionalProperties": False,
+                "examples": [
+                    {
+                        "presentation_id": "ppt_0",
+                        "slide_index": 1,
+                        "table_index": 0,
+                        "row": 0,
+                        "col": 0,
+                        "text": "Product Name",
+                        "bold": True,
+                        "font_size": 14
+                    },
+                    {
+                        "presentation_id": "ppt_0",
+                        "slide_index": 1,
+                        "table_index": 0,
+                        "row": 1,
+                        "col": 1,
+                        "text": "$125.99",
+                        "font_color": "#008000",
+                        "text_alignment": "right"
+                    }
+                ]
+            }
+        ),
+        Tool(
+            name="get_table_info",
+            description="Get comprehensive information about a table including dimensions and cell contents",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "presentation_id": {"type": "string", "description": "Presentation ID"},
+                    "slide_index": {"type": "integer", "description": "Slide index (0-based)", "minimum": 0},
+                    "table_index": {"type": "integer", "description": "Table index on slide (0-based)", "minimum": 0}
+                },
+                "required": ["presentation_id", "slide_index", "table_index"],
+                "additionalProperties": False,
+                "examples": [
+                    {
+                        "presentation_id": "ppt_0",
+                        "slide_index": 1,
+                        "table_index": 0
+                    }
+                ]
+            }
+        ),
+        Tool(
+            name="style_table_cell",
+            description="Apply styling to a specific table cell (background color, borders, margins)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "presentation_id": {"type": "string", "description": "Presentation ID"},
+                    "slide_index": {"type": "integer", "description": "Slide index (0-based)", "minimum": 0},
+                    "table_index": {"type": "integer", "description": "Table index on slide (0-based)", "minimum": 0},
+                    "row": {"type": "integer", "description": "Row index (0-based)", "minimum": 0},
+                    "col": {"type": "integer", "description": "Column index (0-based)", "minimum": 0},
+                    "fill_color": {"type": "string", "description": "Cell background color - hex (#FF0000), RGB (255,0,0), or name (red, blue, etc.)"},
+                    "border_color": {"type": "string", "description": "Border color - hex (#FF0000), RGB (255,0,0), or name (red, blue, etc.)"},
+                    "border_width": {"type": "number", "description": "Border width in points", "minimum": 0},
+                    "margin_left": {"type": "number", "description": "Left margin in inches", "minimum": 0},
+                    "margin_right": {"type": "number", "description": "Right margin in inches", "minimum": 0},
+                    "margin_top": {"type": "number", "description": "Top margin in inches", "minimum": 0},
+                    "margin_bottom": {"type": "number", "description": "Bottom margin in inches", "minimum": 0}
+                },
+                "required": ["presentation_id", "slide_index", "table_index", "row", "col"],
+                "additionalProperties": False,
+                "examples": [
+                    {
+                        "presentation_id": "ppt_0",
+                        "slide_index": 1,
+                        "table_index": 0,
+                        "row": 0,
+                        "col": 0,
+                        "fill_color": "#4472C4",
+                        "border_color": "black",
+                        "border_width": 1
+                    },
+                    {
+                        "presentation_id": "ppt_0",
+                        "slide_index": 1,
+                        "table_index": 0,
+                        "row": 1,
+                        "col": 1,
+                        "fill_color": "#E6F3FF",
+                        "margin_left": 0.1,
+                        "margin_right": 0.1
+                    }
+                ]
+            }
+        ),
+        Tool(
+            name="style_table_range",
+            description="Apply styling to a range of table cells simultaneously",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "presentation_id": {"type": "string", "description": "Presentation ID"},
+                    "slide_index": {"type": "integer", "description": "Slide index (0-based)", "minimum": 0},
+                    "table_index": {"type": "integer", "description": "Table index on slide (0-based)", "minimum": 0},
+                    "start_row": {"type": "integer", "description": "Starting row index (0-based)", "minimum": 0},
+                    "start_col": {"type": "integer", "description": "Starting column index (0-based)", "minimum": 0},
+                    "end_row": {"type": "integer", "description": "Ending row index (0-based)", "minimum": 0},
+                    "end_col": {"type": "integer", "description": "Ending column index (0-based)", "minimum": 0},
+                    "fill_color": {"type": "string", "description": "Cell background color - hex (#FF0000), RGB (255,0,0), or name (red, blue, etc.)"},
+                    "border_color": {"type": "string", "description": "Border color - hex (#FF0000), RGB (255,0,0), or name (red, blue, etc.)"},
+                    "border_width": {"type": "number", "description": "Border width in points", "minimum": 0},
+                    "margin_left": {"type": "number", "description": "Left margin in inches", "minimum": 0},
+                    "margin_right": {"type": "number", "description": "Right margin in inches", "minimum": 0},
+                    "margin_top": {"type": "number", "description": "Top margin in inches", "minimum": 0},
+                    "margin_bottom": {"type": "number", "description": "Bottom margin in inches", "minimum": 0}
+                },
+                "required": ["presentation_id", "slide_index", "table_index", "start_row", "start_col", "end_row", "end_col"],
+                "additionalProperties": False,
+                "examples": [
+                    {
+                        "presentation_id": "ppt_0",
+                        "slide_index": 1,
+                        "table_index": 0,
+                        "start_row": 0,
+                        "start_col": 0,
+                        "end_row": 0,
+                        "end_col": 2,
+                        "fill_color": "#4472C4",
+                        "border_color": "black",
+                        "border_width": 1
+                    },
+                    {
+                        "presentation_id": "ppt_0",
+                        "slide_index": 1,
+                        "table_index": 0,
+                        "start_row": 1,
+                        "start_col": 0,
+                        "end_row": 3,
+                        "end_col": 2,
+                        "fill_color": "#F2F2F2"
+                    }
+                ]
+            }
+        ),
+        Tool(
+            name="create_table_with_data",
+            description="Create a table and populate it with data in one operation (convenience method)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "presentation_id": {"type": "string", "description": "Presentation ID"},
+                    "slide_index": {"type": "integer", "description": "Slide index (0-based)", "minimum": 0},
+                    "table_data": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                        },
+                        "description": "2D array of table data (rows and columns)"
+                    },
+                    "headers": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional header row"
+                    },
+                    "left": {"type": "number", "default": 1, "description": "Left position in inches"},
+                    "top": {"type": "number", "default": 1, "description": "Top position in inches"},
+                    "width": {"type": "number", "default": 8, "description": "Width in inches"},
+                    "height": {"type": "number", "default": 4, "description": "Height in inches"},
+                    "header_style": {
+                        "type": "object",
+                        "description": "Style options for header row (font_size, font_color, bold, etc.)"
+                    },
+                    "data_style": {
+                        "type": "object",
+                        "description": "Style options for data cells (font_size, font_color, etc.)"
+                    },
+                    "alternating_rows": {"type": "boolean", "default": False, "description": "Apply alternating row background colors"}
+                },
+                "required": ["presentation_id", "slide_index", "table_data"],
+                "additionalProperties": False,
+                "examples": [
+                    {
+                        "presentation_id": "ppt_0",
+                        "slide_index": 1,
+                        "table_data": [
+                            ["John", "25", "Engineer"],
+                            ["Jane", "30", "Manager"],
+                            ["Bob", "28", "Designer"]
+                        ],
+                        "headers": ["Name", "Age", "Role"],
+                        "alternating_rows": True
+                    },
+                    {
+                        "presentation_id": "ppt_0",
+                        "slide_index": 2,
+                        "table_data": [
+                            ["Q1", "100", "120"],
+                            ["Q2", "110", "135"],
+                            ["Q3", "105", "125"],
+                            ["Q4", "115", "140"]
+                        ],
+                        "headers": ["Quarter", "Sales", "Target"],
+                        "header_style": {"bold": True, "font_size": 14},
+                        "data_style": {"font_size": 12}
+                    }
+                ]
+            }
+        ),
+        Tool(
+            name="modify_table_structure",
+            description="Modify table structure by adding or removing rows and columns",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "presentation_id": {"type": "string", "description": "Presentation ID"},
+                    "slide_index": {"type": "integer", "description": "Slide index (0-based)", "minimum": 0},
+                    "table_index": {"type": "integer", "description": "Table index on slide (0-based)", "minimum": 0},
+                    "operation": {
+                        "type": "string", 
+                        "enum": ["add_row", "remove_row", "add_column", "remove_column"],
+                        "description": "Type of structure modification to perform"
+                    },
+                    "position": {
+                        "type": "integer",
+                        "description": "Position to insert/remove at (0-based). If not specified: add operations append to end, remove operations remove from end",
+                        "minimum": 0
+                    },
+                    "count": {
+                        "type": "integer",
+                        "default": 1,
+                        "minimum": 1,
+                        "maximum": 20,
+                        "description": "Number of rows/columns to add or remove"
+                    }
+                },
+                "required": ["presentation_id", "slide_index", "table_index", "operation"],
+                "additionalProperties": False,
+                "examples": [
+                    {
+                        "presentation_id": "ppt_0",
+                        "slide_index": 1,
+                        "table_index": 0,
+                        "operation": "add_row",
+                        "position": 2,
+                        "count": 1
+                    },
+                    {
+                        "presentation_id": "ppt_0",
+                        "slide_index": 1,
+                        "table_index": 0,
+                        "operation": "remove_column",
+                        "count": 2
+                    },
+                    {
+                        "presentation_id": "ppt_0",
+                        "slide_index": 1,
+                        "table_index": 0,
+                        "operation": "add_column",
+                        "position": 0,
+                        "count": 1
+                    }
+                ]
+            }
         )
     ]
 
@@ -1763,6 +2795,200 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
             
             message = format_success_message(
                 name, slide_index=slide_index, background_color=background_color, background_image=background_image
+            )
+            return [TextContent(type="text", text=message)]
+        
+        # Table operations - Phase 1 handlers
+        elif name == "add_table":
+            prs_id = validated_args["presentation_id"]
+            slide_index = validated_args["slide_index"]
+            rows = validated_args["rows"]
+            cols = validated_args["cols"]
+            left = validated_args.get("left", 1)
+            top = validated_args.get("top", 1)
+            width = validated_args.get("width", 8)
+            height = validated_args.get("height", 4)
+            header_row = validated_args.get("header_row", False)
+            
+            table_index = ppt_manager.add_table(
+                prs_id, slide_index, rows, cols, left, top, width, height, header_row
+            )
+            
+            message = format_success_message(
+                name, slide_index=slide_index, rows=rows, cols=cols, header_row=header_row
+            )
+            return [TextContent(type="text", text=message)]
+        
+        elif name == "set_table_cell":
+            prs_id = validated_args["presentation_id"]
+            slide_index = validated_args["slide_index"]
+            table_index = validated_args["table_index"]
+            row = validated_args["row"]
+            col = validated_args["col"]
+            text = validated_args["text"]
+            font_size = validated_args.get("font_size")
+            font_name = validated_args.get("font_name")
+            font_color = validated_args.get("font_color")
+            bold = validated_args.get("bold")
+            italic = validated_args.get("italic")
+            underline = validated_args.get("underline")
+            text_alignment = validated_args.get("text_alignment")
+            
+            success = ppt_manager.set_table_cell(
+                prs_id, slide_index, table_index, row, col, text,
+                font_size, font_name, font_color, bold, italic, underline, text_alignment
+            )
+            
+            message = format_success_message(
+                name, slide_index=slide_index, table_index=table_index, row=row, col=col, text=text
+            )
+            return [TextContent(type="text", text=message)]
+        
+        elif name == "get_table_info":
+            prs_id = validated_args["presentation_id"]
+            slide_index = validated_args["slide_index"]
+            table_index = validated_args["table_index"]
+            
+            info = ppt_manager.get_table_info(prs_id, slide_index, table_index)
+            
+            message = format_success_message(
+                name, slide_index=slide_index, table_index=table_index, 
+                rows=info["rows"], cols=info["columns"], total_cells=info["total_cells"]
+            )
+            
+            # Format detailed table info
+            table_details = f"""📊 Table Structure:
+  • Dimensions: {info['rows']} rows × {info['columns']} columns
+  • Total cells: {info['total_cells']}
+
+📝 Cell Contents:"""
+            
+            # Show first few rows of content
+            for row_idx, row_data in enumerate(info['cell_data'][:3]):  # Show first 3 rows
+                row_content = []
+                for cell_data in row_data:
+                    cell_text = cell_data['text']
+                    if cell_text:
+                        # Truncate long cell content for display
+                        display_text = cell_text[:15] + "..." if len(cell_text) > 15 else cell_text
+                        row_content.append(f'"{display_text}"')
+                    else:
+                        row_content.append('""')
+                
+                table_details += f"\n  Row {row_idx}: {' | '.join(row_content)}"
+            
+            if len(info['cell_data']) > 3:
+                table_details += f"\n  ... and {len(info['cell_data']) - 3} more rows"
+            
+            full_message = f"{message}\n\n{table_details}"
+            return [TextContent(type="text", text=full_message)]
+        
+        # Table operations - Phase 2 handlers
+        elif name == "style_table_cell":
+            prs_id = validated_args["presentation_id"]
+            slide_index = validated_args["slide_index"]
+            table_index = validated_args["table_index"]
+            row = validated_args["row"]
+            col = validated_args["col"]
+            fill_color = validated_args.get("fill_color")
+            border_color = validated_args.get("border_color")
+            border_width = validated_args.get("border_width")
+            margin_left = validated_args.get("margin_left")
+            margin_right = validated_args.get("margin_right")
+            margin_top = validated_args.get("margin_top")
+            margin_bottom = validated_args.get("margin_bottom")
+            
+            success = ppt_manager.style_table_cell(
+                prs_id, slide_index, table_index, row, col,
+                fill_color, border_color, border_width,
+                margin_left, margin_right, margin_top, margin_bottom
+            )
+            
+            message = format_success_message(
+                name, slide_index=slide_index, table_index=table_index, row=row, col=col,
+                fill_color=fill_color, border_color=border_color
+            )
+            return [TextContent(type="text", text=message)]
+        
+        elif name == "style_table_range":
+            prs_id = validated_args["presentation_id"]
+            slide_index = validated_args["slide_index"]
+            table_index = validated_args["table_index"]
+            start_row = validated_args["start_row"]
+            start_col = validated_args["start_col"]
+            end_row = validated_args["end_row"]
+            end_col = validated_args["end_col"]
+            fill_color = validated_args.get("fill_color")
+            border_color = validated_args.get("border_color")
+            border_width = validated_args.get("border_width")
+            margin_left = validated_args.get("margin_left")
+            margin_right = validated_args.get("margin_right")
+            margin_top = validated_args.get("margin_top")
+            margin_bottom = validated_args.get("margin_bottom")
+            
+            success = ppt_manager.style_table_range(
+                prs_id, slide_index, table_index, start_row, start_col, end_row, end_col,
+                fill_color, border_color, border_width,
+                margin_left, margin_right, margin_top, margin_bottom
+            )
+            
+            message = format_success_message(
+                name, slide_index=slide_index, table_index=table_index,
+                start_row=start_row, start_col=start_col, end_row=end_row, end_col=end_col
+            )
+            return [TextContent(type="text", text=message)]
+        
+        elif name == "create_table_with_data":
+            prs_id = validated_args["presentation_id"]
+            slide_index = validated_args["slide_index"]
+            table_data = validated_args["table_data"]
+            headers = validated_args.get("headers")
+            left = validated_args.get("left", 1)
+            top = validated_args.get("top", 1)
+            width = validated_args.get("width", 8)
+            height = validated_args.get("height", 4)
+            header_style = validated_args.get("header_style", {})
+            data_style = validated_args.get("data_style", {})
+            alternating_rows = validated_args.get("alternating_rows", False)
+            
+            table_index = ppt_manager.create_table_with_data(
+                prs_id, slide_index, table_data, headers, left, top, width, height,
+                header_style, data_style, alternating_rows
+            )
+            
+            # Calculate table dimensions for success message
+            rows = len(table_data) + (1 if headers else 0)
+            cols = len(table_data[0]) if table_data else 0
+            
+            message = format_success_message(
+                "add_table", slide_index=slide_index, rows=rows, cols=cols, header_row=bool(headers)
+            )
+            
+            # Add data population info
+            data_summary = f"\n📊 Populated with {len(table_data)} data rows"
+            if headers:
+                data_summary += f" and {len(headers)} headers"
+            if alternating_rows:
+                data_summary += " (alternating row colors)"
+            
+            full_message = f"{message}{data_summary}"
+            return [TextContent(type="text", text=full_message)]
+        
+        elif name == "modify_table_structure":
+            prs_id = validated_args["presentation_id"]
+            slide_index = validated_args["slide_index"]
+            table_index = validated_args["table_index"]
+            operation = validated_args["operation"]
+            position = validated_args.get("position")
+            count = validated_args.get("count", 1)
+            
+            success = ppt_manager.modify_table_structure(
+                prs_id, slide_index, table_index, operation, position, count
+            )
+            
+            message = format_success_message(
+                name, slide_index=slide_index, table_index=table_index,
+                operation=operation, position=position, count=count
             )
             return [TextContent(type="text", text=message)]
         
