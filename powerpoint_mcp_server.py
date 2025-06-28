@@ -16,6 +16,8 @@ import os
 import sys
 import tempfile
 import platform
+import time
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -25,6 +27,14 @@ from urllib.parse import urlparse
 # Configure logging early
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("powerpoint-mcp-server")
+
+# Add Pydantic for input validation
+try:
+    from pydantic import BaseModel, field_validator, ValidationError
+    PYDANTIC_AVAILABLE = True
+except ImportError:
+    PYDANTIC_AVAILABLE = False
+    logger.warning("Pydantic not available - input validation will be disabled")
 
 # Windows-specific COM imports for screenshot functionality
 if platform.system() == "Windows":
@@ -79,142 +89,534 @@ except ImportError as e:
     STYLE_ANALYSIS_AVAILABLE = False
 
 # =============================================================================
-# SYSTEM PROMPTS AND TOOL GUIDANCE
+# LEAN PROMPT ARCHITECTURE
 # =============================================================================
 
-# Overall server system prompt
-POWERPOINT_SERVER_SYSTEM_PROMPT = """
-You are a professional PowerPoint presentation assistant with expertise in creating 
-visually appealing, well-structured, and content-rich presentations. Your role is to:
+# Core system prompt - kept under 400 tokens for efficiency
+CORE_SYSTEM_PROMPT = """You are a PowerPoint expert focused on professional, accessible presentations. 
+Key principles: clean layouts, consistent styling, clear hierarchy, readable fonts. 
+Always prioritize visual appeal and professional standards."""
 
-1. PROFESSIONAL DESIGN: Always prioritize clean, professional layouts with consistent 
-   formatting, appropriate spacing, and visual hierarchy.
-
-2. CONTENT CLARITY: Focus on clear, concise messaging with effective use of bullet points, 
-   headings, and visual elements to enhance understanding.
-
-3. BRAND CONSISTENCY: Maintain consistent colors, fonts, and styling throughout presentations.
-   Use corporate color palettes and professional typography.
-
-4. ACCESSIBILITY: Ensure presentations are readable with appropriate contrast, font sizes,
-   and logical content flow.
-
-5. EFFICIENCY: Leverage templates, themes, and automation to create presentations quickly
-   while maintaining high quality standards.
-
-Key Principles:
-- Modify these whenever prompted to do so, these are the defaults, not the rules
-- Less is more: Avoid cluttered slides
-- Visual hierarchy: Use size, color, and positioning to guide attention
-- Consistency: Maintain uniform styling across all slides
-- Professional aesthetics: Choose appropriate colors, fonts, and layouts
-- Data visualization: Present complex information through charts and graphics
-"""
-
-# Category-specific prompts
-PRESENTATION_CREATION_PROMPT = """
-When creating presentations:
-- Start with a clear purpose and target audience in mind
-- Use appropriate slide layouts for different content types (start with blank slides for any new slides)
-- Establish consistent branding and visual themes early
-- Consider the presentation flow and logical progression
-- Ensure all slides serve the overall narrative
-- If no color scheme is provided, create a professional one
-"""
-
-CONTENT_FORMATTING_PROMPT = """
-When formatting content:
-- Use bullet points for lists and key points
-- Keep text concise and readable (max 6 bullet points per slide)
-- Use appropriate font sizes (title: 28-36pt, body: 18-24pt)
-- Maintain consistent spacing and alignment
-- Use bold/italic strategically for emphasis
-- Avoid full sentences in bullet points when possible
-"""
-
-VISUAL_DESIGN_PROMPT = """
-When designing visual elements:
-- Use high-contrast color combinations for readability
-- Align elements to invisible grids for professional appearance
-- Maintain consistent spacing between elements
-- Use white space effectively to avoid clutter
-- Choose colors that support the message and brand
-- Ensure images are high-quality and appropriately sized
-- OK to specify image placeholders with text box that says 'placeholder -- recommend image of X' 
-"""
-
-CHART_DATA_PROMPT = """
-When creating charts and data visualizations:
-- Choose chart types that best represent the data story
-- Use clear, descriptive titles and labels
-- Apply consistent color schemes across all charts
-- Avoid 3D effects that can distort data perception
-- Include data source attribution when appropriate
-- Keep axis labels readable and well-formatted
-"""
-
-TEMPLATE_AUTOMATION_PROMPT = """
-When working with templates and automation:
-- Design templates with flexibility and reusability in mind
-- Use clear placeholder naming conventions
-- Include conditional logic for dynamic content
-- Maintain consistent formatting across generated slides
-- Test templates with various data sets before deployment
-- Document template usage and data requirements
-"""
-
-# Tool-specific prompts
-TOOL_PROMPTS = {
-    "create_presentation": """
-Create a new presentation with professional defaults. Consider the intended use case and audience.
-If using a template, ensure it aligns with the presentation's purpose and brand requirements.
-""",
-    
-    "add_text_box": """
-Add text with appropriate formatting for its role (title, body, caption). Use professional typography
-with adequate font sizes, proper spacing, and consistent alignment. Consider the text hierarchy
-and its relationship to other slide elements.
-""",
-    
-    "add_image": """
-Add images that enhance the content and maintain professional quality. Ensure proper sizing,
-positioning, and aspect ratio. Consider how the image supports the slide's message and
-integrates with other elements.
-""",
-    
-    "add_chart": """
-Create data visualizations that clearly communicate insights. Choose appropriate chart types
-for the data, use professional color schemes, and ensure all labels are readable and meaningful.
-Focus on the story the data tells.
-""",
-    
-    "create_color_palette": """
-Establish brand-consistent color schemes that ensure readability and professional appearance.
-Consider color psychology, accessibility, and how colors work together across different contexts.
-""",
-    
-    "apply_typography_style": """
-Apply consistent typography that supports content hierarchy and readability. Use appropriate
-font sizes, weights, and spacing for different content types (titles, headings, body text, captions).
-""",
-    
-    "create_master_slide_theme": """
-Design comprehensive themes that ensure consistency across all slides. Include proper color schemes,
-typography, spacing guidelines, and layout principles that can be applied systematically.
-""",
-    
-    "create_template": """
-Build reusable templates that combine professional design with flexible content structures.
-Include clear placeholders, logical content flow, and consistent formatting that works
-across different use cases and data sets.
-""",
-    
-    "bulk_generate_presentations": """
-Generate multiple presentations efficiently while maintaining quality and consistency.
-Ensure each presentation serves its specific purpose while adhering to the overall
-design and branding standards.
-"""
+# Focused tool guidance - concise, specific tips only
+FOCUSED_TOOL_GUIDANCE = {
+    "create_presentation": "Use blank slides by default. Apply consistent themes early.",
+    "add_text_box": "Title text: 28-36pt, body: 18-24pt. Max 6 bullets per slide.",
+    "add_image": "Maintain aspect ratio. Use placeholders for missing images.",
+    "add_chart": "Choose chart type that tells the data story. Keep labels readable.",
+    "create_color_palette": "Use high contrast. Consider accessibility and brand alignment.",
+    "apply_typography_style": "Maintain hierarchy: title > heading > body > caption.",
+    "create_master_slide_theme": "Design for consistency and reusability across slides.",
+    "create_template": "Use clear placeholders. Test with varied data sets.",
+    "bulk_generate_presentations": "Maintain quality standards while optimizing efficiency.",
+    "save_presentation": "Verify file path accessibility before saving.",
+    "load_presentation": "Check file format compatibility and integrity.",
+    "add_slide": "Use layout index 6 (blank) for maximum flexibility."
 }
+
+# Success criteria generator
+def get_success_criteria(tool_name: str, **kwargs) -> str:
+    """Generate specific success criteria based on tool and parameters"""
+    criteria = {
+        "create_presentation": "Presentation object created and assigned unique ID.",
+        "add_text_box": f"Text box added to slide with font size {kwargs.get('font_size', 18)}pt.",
+        "add_image": f"Image positioned at ({kwargs.get('left', 1)}, {kwargs.get('top', 1)}) inches.",
+        "add_chart": f"{kwargs.get('chart_type', 'chart').title()} chart with {len(kwargs.get('categories', []))} categories created.",
+        "save_presentation": f"Presentation saved to {kwargs.get('file_path', 'specified path')}.",
+        "load_presentation": f"Presentation loaded from {kwargs.get('file_path', 'file')} successfully.",
+        "add_slide": f"New slide added using layout {kwargs.get('layout_index', 6)}."
+    }
+    return criteria.get(tool_name, f"{tool_name} operation completed successfully.")
+
+# Generate focused prompt for specific tool operation
+def get_focused_prompt(tool_name: str, **kwargs) -> str:
+    """Generate lean, focused prompt for specific tool operation"""
+    base = CORE_SYSTEM_PROMPT
+    tool_specific = FOCUSED_TOOL_GUIDANCE.get(tool_name, "")
+    success_criteria = get_success_criteria(tool_name, **kwargs)
+    
+    return f"{base}\n\n{tool_specific}\n\nSuccess criteria: {success_criteria}"
+
+# =============================================================================
+# ENHANCED SUCCESS MESSAGE FORMATTING
+# =============================================================================
+
+def format_success_message(tool_name: str, **kwargs) -> str:
+    """Generate specific, actionable success messages instead of generic ones"""
+    
+    if tool_name == "add_text_box":
+        slide_idx = kwargs.get('slide_index', 0)
+        font_size = kwargs.get('font_size', 18)
+        text_preview = kwargs.get('text', '')[:50] + ('...' if len(kwargs.get('text', '')) > 50 else '')
+        bold_italic = []
+        if kwargs.get('bold'): bold_italic.append('bold')
+        if kwargs.get('italic'): bold_italic.append('italic')
+        styling = f" ({', '.join(bold_italic)})" if bold_italic else ""
+        
+        return f"✅ Added text box to slide {slide_idx + 1}: \"{text_preview}\" ({font_size}pt{styling})"
+    
+    elif tool_name == "add_image":
+        slide_idx = kwargs.get('slide_index', 0)
+        image_source = kwargs.get('image_source', '')
+        image_name = os.path.basename(image_source) if image_source else 'image'
+        width = kwargs.get('width')
+        height = kwargs.get('height')
+        dimensions = f" ({width}×{height})" if width and height else ""
+        
+        return f"✅ Added image to slide {slide_idx + 1}: {image_name}{dimensions}"
+    
+    elif tool_name == "add_chart":
+        slide_idx = kwargs.get('slide_index', 0)
+        chart_type = kwargs.get('chart_type', 'chart')
+        categories = kwargs.get('categories', [])
+        series_data = kwargs.get('series_data', {})
+        series_names = list(series_data.keys()) if series_data else []
+        
+        return f"✅ Added {chart_type} chart to slide {slide_idx + 1}: {len(categories)} categories, {len(series_names)} series ({', '.join(series_names[:3])}{'...' if len(series_names) > 3 else ''})"
+    
+    elif tool_name == "save_presentation":
+        file_path = kwargs.get('file_path', '')
+        file_name = os.path.basename(file_path) if file_path else 'presentation'
+        file_size = ""
+        try:
+            if file_path and os.path.exists(file_path):
+                size_bytes = os.path.getsize(file_path)
+                if size_bytes > 1024*1024:
+                    file_size = f" ({size_bytes/(1024*1024):.1f}MB)"
+                else:
+                    file_size = f" ({size_bytes/1024:.0f}KB)"
+        except:
+            pass
+        
+        return f"✅ Saved presentation: {file_name}{file_size} → Ready for use!"
+    
+    elif tool_name == "create_presentation":
+        prs_id = kwargs.get('presentation_id', 'new')
+        template_info = f" from template" if kwargs.get('template_path') else ""
+        
+        return f"✅ Created presentation {prs_id}{template_info} → Ready to add slides!"
+    
+    elif tool_name == "add_slide":
+        slide_count = kwargs.get('slide_count', 'unknown')
+        layout_type = kwargs.get('layout_index', 6)
+        layout_name = {6: 'blank', 0: 'title', 1: 'title+content'}.get(layout_type, f'layout_{layout_type}')
+        
+        return f"✅ Added slide {slide_count} ({layout_name} layout) → Ready for content!"
+    
+    # Default fallback
+    return f"✅ {tool_name.replace('_', ' ').title()} completed successfully"
+
+def format_chart_success(chart_type: str, slide_index: int, categories: list, series_names: list) -> str:
+    """Format detailed chart creation success message"""
+    category_summary = f"{len(categories)} periods" if len(categories) <= 10 else f"{len(categories)} periods (large dataset)"
+    series_summary = f"{len(series_names)} series"
+    
+    if len(series_names) <= 3:
+        series_detail = f"({', '.join(series_names)})"
+    else:
+        series_detail = f"({', '.join(series_names[:2])}, +{len(series_names)-2} more)"
+    
+    return f"✅ {chart_type.title()} chart added to slide {slide_index + 1}: {category_summary}, {series_summary} {series_detail}"
+
+# =============================================================================
+# RESULT QUALITY KNOBS - USER PREFERENCE SYSTEM
+# =============================================================================
+
+if PYDANTIC_AVAILABLE:
+    class ResultPreferences(BaseModel):
+        verbosity: str = "normal"  # "brief", "normal", "verbose"
+        tone: str = "professional"  # "executive", "technical", "friendly", "professional"
+        include_preview: bool = True
+        include_tips: bool = False
+        
+        @field_validator('verbosity')
+        @classmethod
+        def validate_verbosity(cls, v):
+            valid_levels = ["brief", "normal", "verbose"]
+            if v not in valid_levels:
+                raise ValueError(f"Verbosity must be one of: {', '.join(valid_levels)}")
+            return v
+            
+        @field_validator('tone')
+        @classmethod
+        def validate_tone(cls, v):
+            valid_tones = ["executive", "technical", "friendly", "professional"]
+            if v not in valid_tones:
+                raise ValueError(f"Tone must be one of: {', '.join(valid_tones)}")
+            return v
+
+def format_response_with_preferences(tool_name: str, base_message: str, preferences: Optional[Dict] = None, **kwargs) -> str:
+    """Format response according to user preferences"""
+    if not preferences:
+        return base_message
+    
+    try:
+        if PYDANTIC_AVAILABLE:
+            prefs = ResultPreferences(**preferences)
+        else:
+            # Fallback without validation
+            prefs = type('Prefs', (), {
+                'verbosity': preferences.get('verbosity', 'normal'),
+                'tone': preferences.get('tone', 'professional'),
+                'include_preview': preferences.get('include_preview', True),
+                'include_tips': preferences.get('include_tips', False)
+            })()
+    except:
+        return base_message  # Return base message if preferences are invalid
+    
+    # Adjust verbosity
+    if prefs.verbosity == "brief":
+        # Strip details, keep only core message
+        if ":" in base_message:
+            brief_msg = base_message.split(":")[0] + " ✓"
+        else:
+            brief_msg = base_message.split("→")[0].strip() if "→" in base_message else base_message
+        response = brief_msg
+    elif prefs.verbosity == "verbose":
+        # Add extra details and context
+        response = base_message
+        if tool_name == "add_text_box" and kwargs.get('text'):
+            response += f"\n💡 Tip: You can adjust positioning with left/top parameters"
+        elif tool_name == "add_chart" and kwargs.get('categories'):
+            response += f"\n💡 Tip: Try different chart types (column, bar, line, pie) for better data visualization"
+        elif tool_name == "save_presentation":
+            response += f"\n💡 Next: Open the file in PowerPoint to present or share"
+    else:
+        response = base_message
+    
+    # Adjust tone
+    if prefs.tone == "executive":
+        response = response.replace("✅", "✓").replace("💡 Tip:", "Note:")
+        response = response.replace("Ready for", "Available for")
+    elif prefs.tone == "friendly":
+        response = response.replace("✅", "🎉").replace("added", "successfully added")
+        if "💡" not in response and prefs.include_tips:
+            response += " 🎊"
+    elif prefs.tone == "technical":
+        # Add technical details where available
+        if tool_name == "add_chart" and kwargs.get('series_data'):
+            data_points = sum(len(series) for series in kwargs['series_data'].values())
+            response += f" [{data_points} data points total]"
+    
+    return response
+
+# =============================================================================
+# OPERATION LOGGING & INSTRUMENTATION
+# =============================================================================
+
+class OperationLogger:
+    """Track operation metrics and usage patterns for continuous improvement"""
+    
+    def __init__(self, log_file: str = "mcp_operations.jsonl"):
+        self.log_file = log_file
+        self.session_start = datetime.utcnow()
+        
+    def log_operation(self, tool: str, success: bool, latency_ms: int, 
+                     args_summary: str = "", error: str = None, **metadata):
+        """Log an operation with timing and success metrics"""
+        log_entry = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "session_start": self.session_start.isoformat(),
+            "tool": tool,
+            "success": success,
+            "latency_ms": latency_ms,
+            "args_summary": args_summary,
+            "error": error,
+            **metadata
+        }
+        
+        try:
+            with open(self.log_file, "a", encoding='utf-8') as f:
+                f.write(json.dumps(log_entry) + "\n")
+        except Exception as e:
+            logger.warning(f"Failed to write operation log: {e}")
+    
+    def log_validation_error(self, tool: str, error: str, args_summary: str = ""):
+        """Log validation errors to track common input issues"""
+        self.log_operation(
+            tool=tool,
+            success=False,
+            latency_ms=0,
+            args_summary=args_summary,
+            error=f"Validation: {error}",
+            error_type="validation"
+        )
+    
+    def get_operation_summary(self, hours: int = 24) -> Dict[str, Any]:
+        """Get operation summary for the last N hours"""
+        try:
+            cutoff_time = datetime.utcnow().timestamp() - (hours * 3600)
+            
+            operations = []
+            if os.path.exists(self.log_file):
+                with open(self.log_file, "r", encoding='utf-8') as f:
+                    for line in f:
+                        try:
+                            entry = json.loads(line.strip())
+                            entry_time = datetime.fromisoformat(entry['timestamp']).timestamp()
+                            if entry_time >= cutoff_time:
+                                operations.append(entry)
+                        except:
+                            continue
+            
+            if not operations:
+                return {"message": "No operations in the specified time period"}
+            
+            # Calculate metrics
+            total_ops = len(operations)
+            successful_ops = sum(1 for op in operations if op['success'])
+            success_rate = (successful_ops / total_ops) * 100 if total_ops > 0 else 0
+            
+            # Tool usage
+            tool_usage = {}
+            for op in operations:
+                tool = op['tool']
+                tool_usage[tool] = tool_usage.get(tool, 0) + 1
+            
+            # Error analysis
+            errors = [op for op in operations if not op['success']]
+            error_types = {}
+            for error in errors:
+                error_type = error.get('error_type', 'unknown')
+                error_types[error_type] = error_types.get(error_type, 0) + 1
+            
+            # Latency stats
+            latencies = [op['latency_ms'] for op in operations if op['latency_ms'] > 0]
+            avg_latency = sum(latencies) / len(latencies) if latencies else 0
+            
+            return {
+                "period_hours": hours,
+                "total_operations": total_ops,
+                "success_rate": round(success_rate, 1),
+                "average_latency_ms": round(avg_latency, 1),
+                "tool_usage": sorted(tool_usage.items(), key=lambda x: x[1], reverse=True),
+                "error_types": error_types,
+                "recent_errors": [{"tool": e['tool'], "error": e['error']} for e in errors[-5:]]
+            }
+        except Exception as e:
+            return {"error": f"Failed to generate summary: {e}"}
+
+# Global operation logger instance
+operation_logger = OperationLogger()
+
+def log_tool_execution(func):
+    """Decorator to automatically log tool execution metrics"""
+    async def wrapper(tool_name: str, *args, **kwargs):
+        start_time = time.time()
+        args_summary = f"args_count={len(kwargs)}"
+        
+        try:
+            result = await func(tool_name, *args, **kwargs)
+            latency_ms = int((time.time() - start_time) * 1000)
+            
+            # Create args summary
+            key_args = []
+            if 'slide_index' in kwargs:
+                key_args.append(f"slide={kwargs['slide_index']}")
+            if 'chart_type' in kwargs:
+                key_args.append(f"type={kwargs['chart_type']}")
+            if 'text' in kwargs:
+                text_preview = kwargs['text'][:20] + "..." if len(kwargs['text']) > 20 else kwargs['text']
+                key_args.append(f"text=\"{text_preview}\"")
+            
+            args_summary = ", ".join(key_args) if key_args else args_summary
+            
+            operation_logger.log_operation(
+                tool=tool_name,
+                success=True,
+                latency_ms=latency_ms,
+                args_summary=args_summary
+            )
+            
+            return result
+        except Exception as e:
+            latency_ms = int((time.time() - start_time) * 1000)
+            operation_logger.log_operation(
+                tool=tool_name,
+                success=False,
+                latency_ms=latency_ms,
+                args_summary=args_summary,
+                error=str(e),
+                error_type="execution"
+            )
+            raise
+    
+    return wrapper
+
+# =============================================================================
+# INPUT VALIDATION MODELS
+# =============================================================================
+
+if PYDANTIC_AVAILABLE:
+    class CreatePresentationRequest(BaseModel):
+        template_path: Optional[str] = None
+        
+        @field_validator('template_path')
+        @classmethod
+        def validate_template_path(cls, v):
+            if v and not os.path.exists(v):
+                raise ValueError(f"Template file not found: {v}")
+            return v
+
+    class AddTextBoxRequest(BaseModel):
+        presentation_id: str
+        slide_index: int
+        text: str
+        left: float = 1
+        top: float = 1
+        width: float = 8
+        height: float = 1
+        font_size: int = 18
+        bold: bool = False
+        italic: bool = False
+        
+        @field_validator('slide_index')
+        @classmethod
+        def validate_slide_index(cls, v):
+            if v < 0:
+                raise ValueError("Slide index cannot be negative")
+            return v
+            
+        @field_validator('font_size')
+        @classmethod
+        def validate_font_size(cls, v):
+            if v < 8 or v > 72:
+                raise ValueError("Font size must be between 8 and 72 points")
+            return v
+            
+        @field_validator('text')
+        @classmethod
+        def validate_text(cls, v):
+            if not v.strip():
+                raise ValueError("Text cannot be empty")
+            return v
+
+    class AddImageRequest(BaseModel):
+        presentation_id: str
+        slide_index: int
+        image_source: str
+        left: float = 1
+        top: float = 1
+        width: Optional[float] = None
+        height: Optional[float] = None
+        
+        @field_validator('slide_index')
+        @classmethod
+        def validate_slide_index(cls, v):
+            if v < 0:
+                raise ValueError("Slide index cannot be negative")
+            return v
+            
+        @field_validator('image_source')
+        @classmethod
+        def validate_image_source(cls, v):
+            # Check if it's a URL or local file
+            if v.startswith(('http://', 'https://')):
+                return v  # URL validation could be added here
+            elif os.path.exists(v):
+                # Check if it's a valid image file
+                valid_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg']
+                if not any(v.lower().endswith(ext) for ext in valid_extensions):
+                    raise ValueError(f"Unsupported image format. Supported: {', '.join(valid_extensions)}")
+                return v
+            else:
+                raise ValueError(f"Image file not found: {v}")
+
+    class AddChartRequest(BaseModel):
+        presentation_id: str
+        slide_index: int
+        chart_type: str
+        categories: List[str]
+        series_data: Dict[str, List[float]]
+        left: float = 2
+        top: float = 2
+        width: float = 6
+        height: float = 4.5
+        
+        @field_validator('slide_index')
+        @classmethod
+        def validate_slide_index(cls, v):
+            if v < 0:
+                raise ValueError("Slide index cannot be negative")
+            return v
+            
+        @field_validator('chart_type')
+        @classmethod
+        def validate_chart_type(cls, v):
+            valid_types = ["column", "bar", "line", "pie"]
+            if v not in valid_types:
+                raise ValueError(f"Chart type must be one of: {', '.join(valid_types)}")
+            return v
+            
+        @field_validator('categories')
+        @classmethod
+        def validate_categories(cls, v):
+            if not v:
+                raise ValueError("Categories cannot be empty")
+            if len(v) > 20:
+                raise ValueError("Maximum 20 categories allowed for readability")
+            return v
+            
+        @field_validator('series_data')
+        @classmethod
+        def validate_series_data(cls, v):
+            if not v:
+                raise ValueError("Series data cannot be empty")
+            if len(v) > 10:
+                raise ValueError("Maximum 10 data series allowed for readability")
+            
+            # Check all series have same length
+            lengths = [len(data) for data in v.values()]
+            if len(set(lengths)) > 1:
+                raise ValueError("All data series must have the same length")
+            return v
+
+    class SavePresentationRequest(BaseModel):
+        presentation_id: str
+        file_path: str
+        
+        @field_validator('file_path')
+        @classmethod
+        def validate_file_path(cls, v):
+            # Check if path ends with .pptx
+            if not v.lower().endswith('.pptx'):
+                raise ValueError("File path must end with .pptx extension")
+            
+            # Note: Directory existence will be checked after path resolution in save_presentation
+            # This allows for simple filenames to be resolved to workspace directory
+            return v
+
+    def validate_request(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate request arguments using Pydantic models"""
+        if not PYDANTIC_AVAILABLE:
+            return arguments  # Skip validation if Pydantic not available
+            
+        validation_models = {
+            "create_presentation": CreatePresentationRequest,
+            "add_text_box": AddTextBoxRequest,
+            "add_image": AddImageRequest,
+            "add_chart": AddChartRequest,
+            "save_presentation": SavePresentationRequest
+        }
+        
+        model_class = validation_models.get(tool_name)
+        if model_class:
+            try:
+                validated = model_class(**arguments)
+                return validated.model_dump()
+            except ValidationError as e:
+                error_messages = []
+                for error in e.errors():
+                    field = " -> ".join(str(x) for x in error["loc"])
+                    message = error["msg"]
+                    error_messages.append(f"{field}: {message}")
+                raise ValueError(f"Invalid input: {'; '.join(error_messages)}")
+        
+        return arguments  # No validation model found, return as-is
+
+else:
+    def validate_request(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Fallback validation when Pydantic is not available"""
+        return arguments
 
 # Logger already configured above
 
@@ -291,52 +693,13 @@ class PowerPointManager:
             ]
         }
     
-    def get_system_prompt(self) -> str:
-        """Get the overall system prompt for the PowerPoint server"""
-        return POWERPOINT_SERVER_SYSTEM_PROMPT
-    
-    def get_category_prompt(self, category: str) -> str:
-        """Get category-specific prompt for different types of operations"""
-        prompts = {
-            "creation": PRESENTATION_CREATION_PROMPT,
-            "formatting": CONTENT_FORMATTING_PROMPT,
-            "visual": VISUAL_DESIGN_PROMPT,
-            "charts": CHART_DATA_PROMPT,
-            "templates": TEMPLATE_AUTOMATION_PROMPT
-        }
-        return prompts.get(category, "")
-    
-    def get_tool_prompt(self, tool_name: str) -> str:
-        """Get tool-specific prompt for a given operation"""
-        return TOOL_PROMPTS.get(tool_name, "")
-    
-    def get_contextual_guidance(self, tool_name: str, **kwargs) -> str:
-        """Get contextual guidance for a tool operation with specific parameters"""
-        base_prompt = self.get_tool_prompt(tool_name)
-        
-        # Add context-specific guidance based on parameters
-        if tool_name == "add_text_box":
-            font_size = kwargs.get("font_size", 18)
-            if font_size >= 28:
-                base_prompt += "\n\nThis appears to be title text - use strong, impactful language."
-            elif font_size <= 14:
-                base_prompt += "\n\nThis appears to be caption text - keep it concise and supportive."
-                
-        elif tool_name == "add_chart":
-            chart_type = kwargs.get("chart_type", "")
-            if chart_type == "pie":
-                base_prompt += "\n\nPie charts work best with 5 or fewer categories. Consider using a bar chart for more categories."
-            elif chart_type == "line":
-                base_prompt += "\n\nLine charts are excellent for showing trends over time. Ensure data points are clearly labeled."
-                
-        elif tool_name == "create_color_palette":
-            base_prompt += "\n\nConsider the presentation's purpose: corporate (blues/grays), creative (varied), financial (blues/greens)."
-            
-        return base_prompt
+    def get_focused_prompt_for_operation(self, tool_name: str, **kwargs) -> str:
+        """Get lean, focused prompt for specific tool operation"""
+        return get_focused_prompt(tool_name, **kwargs)
     
     def log_operation_guidance(self, tool_name: str, **kwargs):
         """Log guidance for the current operation"""
-        guidance = self.get_contextual_guidance(tool_name, **kwargs)
+        guidance = self.get_focused_prompt_for_operation(tool_name, **kwargs)
         logger.info(f"Operation guidance for {tool_name}: {guidance.strip()}")
     
     def create_presentation(self, template_path: Optional[str] = None) -> str:
@@ -381,12 +744,25 @@ class PowerPointManager:
             if prs_id not in self.presentations:
                 raise ValueError(f"Presentation {prs_id} not found")
             
-            self.presentations[prs_id].save(file_path)
-            logger.info(f"Saved presentation {prs_id} to {file_path}")
+            # Handle relative paths and simple filenames by making them relative to workspace
+            resolved_path = self._resolve_file_path(file_path)
+            
+            # Ensure the target directory exists
+            target_dir = os.path.dirname(resolved_path)
+            if target_dir and not os.path.exists(target_dir):
+                os.makedirs(target_dir, exist_ok=True)
+                logger.info(f"Created directory: {target_dir}")
+            
+            self.presentations[prs_id].save(resolved_path)
+            logger.info(f"Saved presentation {prs_id} to {resolved_path}")
             return True
         except Exception as e:
             logger.error(f"Error saving presentation: {e}")
             raise
+
+    async def save_presentation_async(self, prs_id: str, file_path: str) -> bool:
+        """Save a presentation to file asynchronously to prevent blocking"""
+        return await asyncio.to_thread(self.save_presentation, prs_id, file_path)
     
     def add_slide(self, prs_id: str, layout_index: int = 6) -> int:
         """Add a new slide to the presentation"""
@@ -435,6 +811,10 @@ class PowerPointManager:
                     run.font.italic = italic
             
             logger.info(f"Added text box to slide {slide_index} in presentation {prs_id}")
+            
+            # Apply post-processing to fix common issues
+            self.post_process_slide(prs_id, slide_index)
+            
             return True
         except Exception as e:
             logger.error(f"Error adding text box: {e}")
@@ -654,6 +1034,11 @@ class PowerPointManager:
                 pythoncom.CoUninitialize()
             except:
                 pass
+
+    async def screenshot_slides_async(self, file_path: str, output_dir: Optional[str] = None, 
+                                    image_format: str = "PNG", width: int = 1920, height: int = 1080) -> List[str]:
+        """Take screenshots asynchronously to prevent blocking the event loop"""
+        return await asyncio.to_thread(self.screenshot_slides, file_path, output_dir, image_format, width, height)
     
     def analyze_presentation_style(self, file_path: str) -> Dict[str, Any]:
         """Analyze presentation style patterns for learning and reuse"""
@@ -733,6 +1118,44 @@ class PowerPointManager:
             return []
         
         return self.style_analyzer.list_style_profiles()
+
+    def post_process_slide(self, prs_id: str, slide_index: int):
+        """Apply quality checks and fixes after slide operations"""
+        if prs_id not in self.presentations:
+            return
+            
+        try:
+            prs = self.presentations[prs_id]
+            if slide_index >= len(prs.slides):
+                return
+                
+            slide = prs.slides[slide_index]
+            
+            # Fix 1: Clean up placeholder fills that cause green rectangles
+            for shape in slide.shapes:
+                try:
+                    if hasattr(shape, 'is_placeholder') and shape.is_placeholder:
+                        if hasattr(shape, 'fill'):
+                            shape.fill.background()
+                except Exception:
+                    pass  # Skip if shape doesn't support fill operations
+            
+            # Fix 2: Ensure proper bullet formatting in text boxes
+            for shape in slide.shapes:
+                try:
+                    if hasattr(shape, 'text_frame') and shape.text_frame:
+                        for paragraph in shape.text_frame.paragraphs:
+                            if paragraph.text.strip().startswith('•'):
+                                # Ensure paragraph level is set for bullet points
+                                if not hasattr(paragraph, 'level') or paragraph.level is None:
+                                    paragraph.level = 0
+                except Exception:
+                    pass  # Skip if paragraph doesn't support level operations
+                    
+            logger.info(f"Applied post-processing to slide {slide_index} in presentation {prs_id}")
+            
+        except Exception as e:
+            logger.warning(f"Post-processing failed for slide {slide_index}: {e}")
 
     def cleanup(self):
         """Clean up temporary files"""
@@ -1462,6 +1885,53 @@ class PowerPointManager:
             logger.error(f"Error deleting template: {e}")
             raise
     
+    def _resolve_file_path(self, file_path: str) -> str:
+        """Resolve file path to be relative to workspace directory instead of current working directory"""
+        # If it's already an absolute path, use it as-is
+        if os.path.isabs(file_path):
+            return file_path
+        
+        # Get the directory name from the path
+        directory = os.path.dirname(file_path)
+        filename = os.path.basename(file_path)
+        
+        # If no directory specified (just a filename), use workspace directory
+        if not directory:
+            # Try to detect workspace directory from common indicators
+            workspace_dir = self._detect_workspace_directory()
+            resolved_path = os.path.join(workspace_dir, filename)
+            logger.info(f"Resolved simple filename '{filename}' to workspace path: {resolved_path}")
+            return resolved_path
+        
+        # For relative paths with directories, make them relative to workspace
+        workspace_dir = self._detect_workspace_directory()
+        resolved_path = os.path.join(workspace_dir, file_path)
+        logger.info(f"Resolved relative path '{file_path}' to workspace path: {resolved_path}")
+        return resolved_path
+    
+    def _detect_workspace_directory(self) -> str:
+        """Detect the workspace directory by looking for common project indicators"""
+        current_dir = os.getcwd()
+        
+        # Common project files that indicate a workspace root
+        workspace_indicators = [
+            'package.json', 'requirements.txt', '.git', 'README.md', 
+            'pyproject.toml', 'setup.py', 'pom.xml', 'Cargo.toml'
+        ]
+        
+        # Start from current directory and walk up the tree
+        check_dir = current_dir
+        while check_dir != os.path.dirname(check_dir):  # Stop at root
+            for indicator in workspace_indicators:
+                if os.path.exists(os.path.join(check_dir, indicator)):
+                    logger.info(f"Detected workspace directory: {check_dir}")
+                    return check_dir
+            check_dir = os.path.dirname(check_dir)
+        
+        # Fallback to current directory if no workspace indicators found
+        logger.info(f"Using current directory as workspace: {current_dir}")
+        return current_dir
+
     def _substitute_variables(self, text: str, data: Dict[str, Any]) -> str:
         """Replace placeholders in text with actual data"""
         try:
@@ -1667,7 +2137,13 @@ async def handle_list_tools() -> List[Tool]:
                         "type": "string",
                         "description": "Optional path to template file"
                     }
-                }
+                },
+                "examples": [
+                    {},
+                    {
+                        "template_path": "./templates/corporate_template.pptx"
+                    }
+                ]
             }
         ),
         Tool(
@@ -1699,7 +2175,13 @@ async def handle_list_tools() -> List[Tool]:
                         "description": "Path where to save the presentation"
                     }
                 },
-                "required": ["presentation_id", "file_path"]
+                "required": ["presentation_id", "file_path"],
+                "examples": [
+                    {
+                        "presentation_id": "prs_0",
+                        "file_path": "./output/quarterly_report.pptx"
+                    }
+                ]
             }
         ),
         Tool(
@@ -1738,7 +2220,23 @@ async def handle_list_tools() -> List[Tool]:
                     "bold": {"type": "boolean", "default": False},
                     "italic": {"type": "boolean", "default": False}
                 },
-                "required": ["presentation_id", "slide_index", "text"]
+                "required": ["presentation_id", "slide_index", "text"],
+                "examples": [
+                    {
+                        "presentation_id": "prs_0",
+                        "slide_index": 0,
+                        "text": "Quarterly Results Overview",
+                        "font_size": 32,
+                        "bold": true
+                    },
+                    {
+                        "presentation_id": "prs_0",
+                        "slide_index": 1,
+                        "text": "• Revenue increased 25% year-over-year\n• New customer acquisition up 40%\n• Profit margins improved to 18%",
+                        "top": 2,
+                        "font_size": 20
+                    }
+                ]
             }
         ),
         Tool(
@@ -1755,7 +2253,27 @@ async def handle_list_tools() -> List[Tool]:
                     "width": {"type": "number"},
                     "height": {"type": "number"}
                 },
-                "required": ["presentation_id", "slide_index", "image_source"]
+                "required": ["presentation_id", "slide_index", "image_source"],
+                "examples": [
+                    {
+                        "presentation_id": "prs_0",
+                        "slide_index": 2,
+                        "image_source": "./assets/company_logo.png",
+                        "left": 8,
+                        "top": 0.5,
+                        "width": 2,
+                        "height": 1
+                    },
+                    {
+                        "presentation_id": "prs_0",
+                        "slide_index": 3,
+                        "image_source": "https://example.com/graph.png",
+                        "left": 2,
+                        "top": 2.5,
+                        "width": 6,
+                        "height": 4
+                    }
+                ]
             }
         ),
         Tool(
@@ -1777,7 +2295,19 @@ async def handle_list_tools() -> List[Tool]:
                     "width": {"type": "number", "default": 6},
                     "height": {"type": "number", "default": 4.5}
                 },
-                "required": ["presentation_id", "slide_index", "chart_type", "categories", "series_data"]
+                "required": ["presentation_id", "slide_index", "chart_type", "categories", "series_data"],
+                "examples": [
+                    {
+                        "presentation_id": "prs_0",
+                        "slide_index": 1,
+                        "chart_type": "column",
+                        "categories": ["Q1", "Q2", "Q3", "Q4"],
+                        "series_data": {
+                            "Revenue": [100, 150, 120, 180],
+                            "Profit": [20, 30, 25, 40]
+                        }
+                    }
+                ]
             }
         ),
         Tool(
@@ -2355,19 +2885,71 @@ async def handle_list_tools() -> List[Tool]:
                 },
                 "required": ["template_id"]
             }
+        ),
+        
+        # Analytics and Monitoring Tools
+        Tool(
+            name="get_operation_analytics",
+            description="Get server operation analytics and usage patterns",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "hours": {
+                        "type": "integer",
+                        "default": 24,
+                        "description": "Number of hours to analyze (default: 24)"
+                    },
+                    "format": {
+                        "type": "string",
+                        "enum": ["summary", "detailed"],
+                        "default": "summary",
+                        "description": "Analysis format level"
+                    }
+                }
+            }
         )
     ]
 
 @server.call_tool()
 async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
     """Handle tool calls for PowerPoint operations"""
+    start_time = time.time()
+    
     try:
-        if name == "create_presentation":
-            template_path = arguments.get("template_path")
-            prs_id = ppt_manager.create_presentation(template_path)
+        # Extract user preferences if provided
+        user_preferences = arguments.pop('_preferences', None)
+        
+        # Validate input arguments before processing
+        try:
+            validated_args = validate_request(name, arguments)
+        except ValueError as e:
+            # Log validation error
+            operation_logger.log_validation_error(name, str(e))
+            
             return [TextContent(
                 type="text",
-                text=f"Created presentation with ID: {prs_id}"
+                text=f"❌ Invalid input: {str(e)}"
+            )]
+        
+        if name == "create_presentation":
+            template_path = validated_args.get("template_path")
+            prs_id = ppt_manager.create_presentation(template_path)
+            
+            success_msg = format_success_message("create_presentation", 
+                                               presentation_id=prs_id, 
+                                               template_path=template_path)
+            
+            # Apply user preferences if provided
+            if user_preferences:
+                success_msg = format_response_with_preferences("create_presentation", success_msg, user_preferences, **validated_args)
+            
+            # Log successful operation
+            latency_ms = int((time.time() - start_time) * 1000)
+            operation_logger.log_operation("create_presentation", True, latency_ms, f"template={bool(template_path)}")
+            
+            return [TextContent(
+                type="text",
+                text=success_msg
             )]
         
         elif name == "load_presentation":
@@ -2379,13 +2961,21 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
             )]
         
         elif name == "save_presentation":
-            prs_id = arguments["presentation_id"]
-            file_path = arguments["file_path"]
-            success = ppt_manager.save_presentation(prs_id, file_path)
-            return [TextContent(
-                type="text",
-                text=f"Saved presentation {prs_id} to {file_path}"
-            )]
+            prs_id = validated_args["presentation_id"]
+            file_path = validated_args["file_path"]
+            success = await ppt_manager.save_presentation_async(prs_id, file_path)
+            
+            # Return rich content with file access
+            return [
+                TextContent(
+                    type="text",
+                    text=f"✅ Presentation {prs_id} saved successfully to {file_path}"
+                ),
+                EmbeddedResource(
+                    uri=f"file://{os.path.abspath(file_path)}",
+                    mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                )
+            ]
         
         elif name == "add_slide":
             prs_id = arguments["presentation_id"]
@@ -2398,52 +2988,81 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
         
         elif name == "add_text_box":
             result = ppt_manager.add_text_box(
-                arguments["presentation_id"],
-                arguments["slide_index"],
-                arguments["text"],
-                arguments.get("left", 1),
-                arguments.get("top", 1),
-                arguments.get("width", 8),
-                arguments.get("height", 1),
-                arguments.get("font_size", 18),
-                arguments.get("bold", False),
-                arguments.get("italic", False)
+                validated_args["presentation_id"],
+                validated_args["slide_index"],
+                validated_args["text"],
+                validated_args.get("left", 1),
+                validated_args.get("top", 1),
+                validated_args.get("width", 8),
+                validated_args.get("height", 1),
+                validated_args.get("font_size", 18),
+                validated_args.get("bold", False),
+                validated_args.get("italic", False)
             )
+            
+            success_msg = format_success_message("add_text_box", **validated_args)
+            
             return [TextContent(
                 type="text",
-                text=f"Added text box to slide {arguments['slide_index']}"
+                text=success_msg
             )]
         
         elif name == "add_image":
-            result = ppt_manager.add_image(
-                arguments["presentation_id"],
-                arguments["slide_index"],
-                arguments["image_source"],
-                arguments.get("left", 1),
-                arguments.get("top", 1),
-                arguments.get("width"),
-                arguments.get("height")
-            )
-            return [TextContent(
-                type="text",
-                text=f"Added image to slide {arguments['slide_index']}"
-            )]
+            prs_id = validated_args["presentation_id"]
+            slide_index = validated_args["slide_index"]
+            image_source = validated_args["image_source"]
+            left = validated_args.get("left", 1)
+            top = validated_args.get("top", 1)
+            width = validated_args.get("width")
+            height = validated_args.get("height")
+            
+            result = ppt_manager.add_image(prs_id, slide_index, image_source, left, top, width, height)
+            
+            # Create rich response with image preview for local files
+            response = [
+                TextContent(
+                    type="text",
+                    text=f"✅ Image added to slide {slide_index} at position ({left}, {top}) inches"
+                )
+            ]
+            
+            # Add embedded resource if it's a local file
+            if not image_source.startswith(('http://', 'https://')) and os.path.exists(image_source):
+                # Determine mime type based on file extension
+                ext = os.path.splitext(image_source)[1].lower()
+                mime_types = {
+                    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+                    '.png': 'image/png', '.gif': 'image/gif',
+                    '.bmp': 'image/bmp', '.svg': 'image/svg+xml'
+                }
+                mime_type = mime_types.get(ext, 'image/png')
+                
+                response.append(EmbeddedResource(
+                    uri=f"file://{os.path.abspath(image_source)}",
+                    mimeType=mime_type
+                ))
+            
+            return response
         
         elif name == "add_chart":
-            result = ppt_manager.add_chart(
-                arguments["presentation_id"],
-                arguments["slide_index"],
-                arguments["chart_type"],
-                arguments["categories"],
-                arguments["series_data"],
-                arguments.get("left", 2),
-                arguments.get("top", 2),
-                arguments.get("width", 6),
-                arguments.get("height", 4.5)
-            )
+            prs_id = validated_args["presentation_id"]
+            slide_index = validated_args["slide_index"]
+            chart_type = validated_args["chart_type"]
+            categories = validated_args["categories"]
+            series_data = validated_args["series_data"]
+            left = validated_args.get("left", 2)
+            top = validated_args.get("top", 2)
+            width = validated_args.get("width", 6)
+            height = validated_args.get("height", 4.5)
+            
+            result = ppt_manager.add_chart(prs_id, slide_index, chart_type, categories, series_data, left, top, width, height)
+            
+            # Create detailed success message
+            success_msg = format_success_message("add_chart", **validated_args)
+            
             return [TextContent(
                 type="text",
-                text=f"Added {arguments['chart_type']} chart to slide {arguments['slide_index']}"
+                text=success_msg
             )]
         
         elif name == "extract_text":
@@ -2469,7 +3088,7 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
             width = arguments.get("width", 1920)
             height = arguments.get("height", 1080)
             
-            screenshot_paths = ppt_manager.screenshot_slides(
+            screenshot_paths = await ppt_manager.screenshot_slides_async(
                 file_path, output_dir, image_format, width, height
             )
             
@@ -2757,11 +3376,42 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
                 type="text",
                 text=f"Deleted template {template_id}"
             )]
+            
+        elif name == "get_operation_analytics":
+            hours = arguments.get("hours", 24)
+            format_type = arguments.get("format", "summary")
+            
+            analytics = operation_logger.get_operation_summary(hours)
+            
+            if format_type == "summary":
+                # Create a concise summary
+                if "error" in analytics:
+                    summary_text = f"Analytics Error: {analytics['error']}"
+                elif "message" in analytics:
+                    summary_text = analytics["message"]
+                else:
+                    summary_text = f"""📊 Server Analytics (Last {hours}h)
+✅ Operations: {analytics['total_operations']} ({analytics['success_rate']}% success)
+⚡ Avg Response: {analytics['average_latency_ms']}ms
+🔥 Top Tools: {', '.join([f"{tool}({count})" for tool, count in analytics['tool_usage'][:3]])}
+❌ Error Types: {', '.join([f"{err_type}({count})" for err_type, count in analytics['error_types'].items()]) if analytics['error_types'] else 'None'}"""
+            else:
+                # Return detailed JSON
+                summary_text = json.dumps(analytics, indent=2)
+            
+            return [TextContent(
+                type="text",
+                text=summary_text
+            )]
         
         else:
             raise ValueError(f"Unknown tool: {name}")
     
     except Exception as e:
+        # Log failed operation
+        latency_ms = int((time.time() - start_time) * 1000)
+        operation_logger.log_operation(name, False, latency_ms, error=str(e), error_type="execution")
+        
         logger.error(f"Error in tool {name}: {e}")
         return [TextContent(
             type="text",
