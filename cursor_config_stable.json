@@ -1,14 +1,11 @@
 {
   "mcpServers": {
-    "powerpoint-stable": {
+    "powerpoint": {
       "command": "python",
-      "args": ["./powerpoint_mcp_server_stable.py"],
-      "env": {},
-      "description": "Stable PowerPoint MCP Server for presentation manipulation",
-      "capabilities": {
-        "tools": true,
-        "logging": true
-      }
+      "args": [
+        "powerpoint_mcp_server_stable.py"
+      ],
+      "alwaysRunning": true
     }
   }
 } 
