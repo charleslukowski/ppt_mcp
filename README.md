@@ -5,29 +5,44 @@ A comprehensive Model Context Protocol (MCP) server for PowerPoint presentation 
 ## Features
 
 ### Core Presentation Management
-- **Create presentations** from scratch or templates
-- **Load existing presentations** from files
-- **Save presentations** to various formats
-- **Extract text content** from presentations
-- **Get presentation metadata** and structure information
+- **`create_presentation`** - Create presentations from scratch or templates
+- **`load_presentation`** - Load existing PowerPoint files for editing
+- **`save_presentation`** - Save presentations with automatic path resolution
+- **`add_slide`** - Add slides with different layouts (title, content, blank, etc.)
+- **`extract_text`** - Extract all text content for analysis
+- **`get_presentation_info`** - Get metadata and structure information
 
-### Slide Operations
-- **Add slides** with different layouts (title, content, blank, etc.)
-- **Manage slide content** programmatically
-- **Batch slide creation** from structured data
+### Content Creation & Manipulation
+- **`add_text_box`** - Rich text formatting (font size, bold, italic, colors)
+- **`add_image`** - Images from files or URLs with precise positioning
+- **`add_chart`** - Data-driven charts (column, bar, line, pie, area)
+- **`create_from_json`** - Schema-driven presentation creation
+- **`add_professional_shape`** - Professional shapes from built-in library
 
-### Content Manipulation
-- **Text boxes** with rich formatting (font size, bold, italic)
-- **Images** from files or URLs with precise positioning
-- **Charts** (column, bar, line, pie) with data-driven content
-- **Precise positioning** using inch-based measurements
+### Visual Analysis & Review
+- **`screenshot_slides`** - Generate high-quality slide screenshots (Windows only)
+- **`critique_presentation`** - Comprehensive analysis (design, content, accessibility, technical)
 
-### Advanced Features
-- **Template-based workflows** for consistent branding
-- **JSON schema-driven** presentation creation
-- **Batch processing** capabilities
-- **URL image integration** for dynamic content
-- **Content extraction** for analysis and processing
+### Style Management & Automation
+- **`analyze_presentation_style`** - Extract style patterns for learning
+- **`create_style_profile`** - Build reusable style profiles
+- **`apply_style_profile`** - Apply learned styles to presentations
+- **`save_style_profile`** / **`load_style_profile`** - Persist style data
+
+### Professional Layout & Design
+- **`create_layout_grid`** - Professional alignment grids
+- **`snap_to_grid`** - Snap shapes to grid positions
+- **`distribute_shapes`** - Even spacing distribution
+- **`create_color_palette`** / **`apply_color_palette`** - Brand-consistent colors
+- **`create_typography_profile`** / **`apply_typography_style`** - Typography hierarchies
+
+### Master Themes & Templates
+- **`create_master_slide_theme`** - Master slide themes with consistent formatting
+- **`apply_master_theme`** - Apply themes across entire presentations
+- **`create_template`** - Reusable templates with placeholders and logic
+- **`apply_template`** - Data-driven template application
+- **`bulk_generate_presentations`** - Generate multiple presentations from templates
+
 
 ## Installation
 
@@ -72,251 +87,6 @@ Example configuration:
 }
 ```
 
-## Available Tools
-
-### 1. create_presentation
-Create a new PowerPoint presentation, optionally from a template.
-
-```json
-{
-  "name": "create_presentation",
-  "arguments": {
-    "template_path": "optional/path/to/template.pptx"
-  }
-}
-```
-
-### 2. load_presentation
-Load an existing PowerPoint presentation from file.
-
-```json
-{
-  "name": "load_presentation",
-  "arguments": {
-    "file_path": "path/to/presentation.pptx"
-  }
-}
-```
-
-### 3. save_presentation
-Save a presentation to file.
-
-```json
-{
-  "name": "save_presentation",
-  "arguments": {
-    "presentation_id": "prs_0",
-    "file_path": "output/presentation.pptx"
-  }
-}
-```
-
-### 4. add_slide
-Add a new slide to a presentation.
-
-```json
-{
-  "name": "add_slide",
-  "arguments": {
-    "presentation_id": "prs_0",
-    "layout_index": 6
-  }
-}
-```
-
-**Layout indices:**
-- 0: Title slide
-- 1: Title and content
-- 2: Section header
-- 3: Two content
-- 4: Comparison
-- 5: Title only
-- 6: Blank
-- 7: Content with caption
-- 8: Picture with caption
-
-### 5. add_text_box
-Add a formatted text box to a slide.
-
-```json
-{
-  "name": "add_text_box",
-  "arguments": {
-    "presentation_id": "prs_0",
-    "slide_index": 0,
-    "text": "Hello, World!",
-    "left": 1,
-    "top": 1,
-    "width": 8,
-    "height": 1,
-    "font_size": 24,
-    "bold": true,
-    "italic": false
-  }
-}
-```
-
-### 6. add_image
-Add an image from file or URL.
-
-```json
-{
-  "name": "add_image",
-  "arguments": {
-    "presentation_id": "prs_0",
-    "slide_index": 0,
-    "image_source": "https://example.com/image.jpg",
-    "left": 2,
-    "top": 2,
-    "width": 4,
-    "height": 3
-  }
-}
-```
-
-### 7. add_chart
-Add a data-driven chart to a slide.
-
-```json
-{
-  "name": "add_chart",
-  "arguments": {
-    "presentation_id": "prs_0",
-    "slide_index": 0,
-    "chart_type": "column",
-    "categories": ["Q1", "Q2", "Q3", "Q4"],
-    "series_data": {
-      "Sales": [100, 150, 120, 180],
-      "Profit": [20, 30, 25, 40]
-    }
-  }
-}
-```
-
-### 8. extract_text
-Extract all text content from a presentation.
-
-```json
-{
-  "name": "extract_text",
-  "arguments": {
-    "presentation_id": "prs_0"
-  }
-}
-```
-
-### 9. get_presentation_info
-Get metadata about a presentation.
-
-```json
-{
-  "name": "get_presentation_info",
-  "arguments": {
-    "presentation_id": "prs_0"
-  }
-}
-```
-
-### 10. create_from_json
-Create a presentation from structured JSON data.
-
-```json
-{
-  "name": "create_from_json",
-  "arguments": {
-    "json_data": {
-      "slide1": {
-        "title": "Welcome",
-        "content": "This is the first slide"
-      },
-      "slide2": {
-        "title": "Data Overview",
-        "content": "Key metrics and insights"
-      }
-    },
-    "template_path": "optional/template.pptx"
-  }
-}
-```
-
-## Examples
-
-### Example 1: Create a Simple Presentation
-
-```python
-# Through MCP calls:
-# 1. Create presentation
-create_presentation()  # Returns: prs_0
-
-# 2. Add title slide
-add_slide(presentation_id="prs_0", layout_index=0)  # Returns: slide 0
-
-# 3. Add title text
-add_text_box(
-    presentation_id="prs_0",
-    slide_index=0,
-    text="My Presentation",
-    left=1, top=1, width=8, height=1,
-    font_size=32, bold=True
-)
-
-# 4. Save presentation
-save_presentation(presentation_id="prs_0", file_path="my_presentation.pptx")
-```
-
-### Example 2: Data-Driven Presentation
-
-```python
-# Create presentation with chart
-create_presentation()  # Returns: prs_0
-add_slide(presentation_id="prs_0", layout_index=6)  # Blank slide
-
-# Add chart with sales data
-add_chart(
-    presentation_id="prs_0",
-    slide_index=0,
-    chart_type="column",
-    categories=["Jan", "Feb", "Mar", "Apr"],
-    series_data={
-        "Revenue": [10000, 12000, 11000, 15000],
-        "Expenses": [8000, 9000, 8500, 11000]
-    }
-)
-
-save_presentation(presentation_id="prs_0", file_path="sales_report.pptx")
-```
-
-### Example 3: Template-Based Workflow
-
-```python
-# Create from template
-create_presentation(template_path="company_template.pptx")  # Returns: prs_0
-
-# Add content slides
-add_slide(presentation_id="prs_0", layout_index=1)  # Title and content
-add_text_box(
-    presentation_id="prs_0",
-    slide_index=0,
-    text="Q4 Results",
-    font_size=28, bold=True
-)
-
-# Add image from URL
-add_image(
-    presentation_id="prs_0",
-    slide_index=0,
-    image_source="https://charts.example.com/q4-performance.png",
-    left=1, top=3, width=8, height=4
-)
-```
-
-## Resources
-
-The server exposes loaded presentations as MCP resources:
-
-- **URI**: `powerpoint://prs_0`
-- **Type**: `application/vnd.openxmlformats-officedocument.presentationml.presentation`
-- **Content**: JSON representation of presentation structure and text content
 
 ## Architecture
 
@@ -338,5 +108,5 @@ This project is licensed under the MIT License.
 
 ## Acknowledgments
 
-- Built on the excellent [python-pptx](https://python-pptx.readthedocs.io/) library
-- Follows MCP protocol specifications
+- Built on the [python-pptx](https://python-pptx.readthedocs.io/) library
+

@@ -1,2 +1,0 @@
-{"timestamp": "2025-06-27T19:22:58.485324", "session_start": "2025-06-27T19:22:58.477974", "tool": "test_tool", "success": true, "latency_ms": 150, "args_summary": "slide=0, text=\"test\"", "error": null}
-{"timestamp": "2025-06-27T19:22:58.507532", "session_start": "2025-06-27T19:22:58.477974", "tool": "test_validation", "success": false, "latency_ms": 0, "args_summary": "font_size=200", "error": "Validation: Font size must be between 8 and 72 points", "error_type": "validation"}

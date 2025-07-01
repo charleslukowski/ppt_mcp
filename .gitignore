@@ -168,9 +168,12 @@ cython_debug/
 # Cursor IDE
 .cursor/
 
-# PowerPoint files (test outputs)
+# PowerPoint files (test outputs) - but keep demo folder files
 *.pptx
 *.ppt
+# Exception: Keep PowerPoint files in demo folder
+!demo/*.pptx
+!demo/*.ppt
 
 # Temporary files
 *.tmp
